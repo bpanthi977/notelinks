@@ -26,11 +26,10 @@ class _Store(Protocol):
 
     def query_chunks(
         self,
-        embedding: list[float],
-        *,
+        query_embedding: list[float],
         k: int,
-        exclude_note_uuid: str,
-        exclude_target_uuids: list[str],
+        exclude_note_uuid: str | None = None,
+        exclude_target_uuids: list[str] | None = None,
     ) -> list[tuple[Chunk, float]]:
         """Return up to ``k`` (target_chunk, cosine_similarity) pairs, best-first."""
         ...
