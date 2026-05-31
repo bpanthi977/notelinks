@@ -85,7 +85,9 @@ the note being edited. Keeping info + keys in one fixed side window never hides
 the working buffer.
 
 - Panel content: **type**, **confidence (1–5)**, **why**, **target** (note title
-  + heading), a snippet of the **target excerpt**, then the key legend.
+  + heading), a snippet of the **target excerpt**, then the key legend. The side
+  window auto-fits its content (`fit-window-to-buffer`, bounded) so the info and
+  the keys are **both** visible; the excerpt is truncated to keep it bounded.
 - It tracks point via a buffer-local `post-command-hook` (and an explicit update
   after programmatic moves), re-rendering only when the suggestion under point
   changes. Off a suggestion it shows a hint plus the legend.

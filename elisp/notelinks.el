@@ -446,6 +446,9 @@ where KEPT is plists and DISCARDED is `notelinks-sug' structs."
 
 ;;;; Metainfo (side panel + help-echo)
 
+(defun notelinks--truncate (s n)
+  (if (and (stringp s) (> (length s) n)) (concat (substring s 0 n) "…") s))
+
 (defun notelinks--describe (s)
   (let* ((tgt (notelinks-sug-target s))
          (title (alist-get 'title tgt))
@@ -457,7 +460,7 @@ where KEPT is plists and DISCARDED is `notelinks-sug' structs."
                     (notelinks-sug-why s))
             (format "\n→ %s" loc)
             (when (and excerpt (not (string-empty-p excerpt)))
-              (format "\n  \"%s\"" excerpt)))))
+              (format "\n  \"%s\"" (notelinks--truncate excerpt 200))))))
 
 ;;;; Navigation
 
@@ -634,13 +637,20 @@ where KEPT is plists and DISCARDED is `notelinks-sug' structs."
       (setq-local mode-line-format nil))
     buf))
 
+(defun notelinks--fit-panel ()
+  "Grow/shrink the side window to fit its content (bounded), so the info
+*and* the key legend are both visible."
+  (when (window-live-p notelinks--info-window)
+    (fit-window-to-buffer notelinks--info-window 16 5)))
+
 (defun notelinks--show-panel ()
   "Open the bottom side window with the info/keys panel."
   (setq notelinks--panel-current :none)        ; force the first real render
   (setq notelinks--info-window
         (display-buffer-in-side-window
          (notelinks--render-panel nil)
-         '((side . bottom) (window-height . 8)))))
+         '((side . bottom) (window-height . 8))))
+  (notelinks--fit-panel))
 
 (defun notelinks--update-panel ()
   "Refresh the panel to show the suggestion at point, if it changed.
@@ -651,7 +661,8 @@ it never pops its own buffer over the note being edited."
     (let ((s (notelinks--at-point)))
       (unless (eq s notelinks--panel-current)
         (setq notelinks--panel-current s)
-        (notelinks--render-panel s)))))
+        (notelinks--render-panel s)
+        (notelinks--fit-panel)))))
 
 (defun notelinks--hide-panel ()
   (when (window-live-p notelinks--info-window)
