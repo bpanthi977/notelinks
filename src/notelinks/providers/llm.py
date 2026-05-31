@@ -19,10 +19,17 @@ Key behaviours
   reach the upstream model. The OpenAI SDK's typed params reject the extra
   ``cache_control`` key, so we always send messages as raw dicts via the SDK's
   pass-through (it accepts ``list[dict]``); unknown keys are forwarded verbatim.
-* **Injected client.** ``make_client`` builds the long-lived ``OpenAI`` handle
-  once (design §2: clients are constructed once and injected). Pipeline
-  functions stay stateless and take the client (or let the function build a
-  throwaway one, which tests monkeypatch).
+* **Injected client.** ``make_client`` builds the long-lived OpenRouter
+  ``OpenAI`` handle once (design §2: clients are constructed once and injected).
+  ``make_judge_client`` selects the judge backend by ``settings.judge_provider``:
+  OpenRouter (default) or a local Ollama OpenAI-compatible endpoint (T18).
+  Pipeline functions stay stateless and take the client (or let the function
+  build a throwaway one, which tests monkeypatch).
+* **Provider-aware request shape (T18).** For ``judge_provider="openrouter"`` the
+  Anthropic-isms (list-of-parts content + ``cache_control``) are forwarded
+  unchanged. For any other provider (Ollama) the messages are first flattened to
+  plain-string content with ``cache_control`` dropped, since generic endpoints
+  can't use it.
 """
 
 from __future__ import annotations
@@ -63,6 +70,23 @@ def make_client(settings: Settings) -> OpenAI:
         api_key=settings.openrouter_api_key,
         base_url=settings.openrouter_base_url,
     )
+
+
+def make_judge_client(settings: Settings) -> OpenAI:
+    """Build the JUDGE client, routed by ``settings.judge_provider`` (T18).
+
+    * ``"ollama"`` → an :class:`OpenAI` handle pointed at the local Ollama
+      OpenAI-compatible endpoint (``settings.ollama_base_url``). Ollama needs no
+      auth, so a dummy ``api_key="ollama"`` is used and OPENROUTER_API_KEY is NOT
+      required for the judge in this mode (embeddings still need it).
+    * ``"openrouter"`` (default) → the existing OpenRouter client via
+      :func:`make_client`, requiring ``openrouter_api_key``.
+    """
+    if settings.judge_provider == "ollama":
+        # Local endpoint: no real key needed; the OpenAI SDK still wants a
+        # non-empty api_key, so pass a dummy placeholder.
+        return OpenAI(base_url=settings.ollama_base_url, api_key="ollama")
+    return make_client(settings)
 
 
 def cached_text(text: str) -> dict[str, Any]:
@@ -190,6 +214,32 @@ def _extract_json(text: str) -> str:
     return stripped
 
 
+def _normalize_for_non_anthropic(messages: list[Any]) -> list[Any]:
+    """Flatten list-of-parts content to a plain string and drop ``cache_control``.
+
+    OpenRouter forwards Anthropic-isms (list-of-parts content + ``cache_control``
+    ephemeral breakpoints) untouched, but a generic OpenAI-compatible endpoint
+    such as Ollama cannot use ``cache_control`` and may reject the part shape. For
+    those providers we collapse each message's ``content`` to a single string by
+    concatenating the ``text`` of its parts (the cache breakpoint is simply
+    dropped — it carried no content, only caching metadata). Plain-string content
+    is left as-is. Returns NEW message dicts; the input is not mutated.
+    """
+    normalized: list[Any] = []
+    for msg in messages:
+        content = msg.get("content")
+        if isinstance(content, list):
+            text = "".join(
+                part.get("text", "")
+                for part in content
+                if isinstance(part, dict)
+            )
+            normalized.append({**msg, "content": text})
+        else:
+            normalized.append(dict(msg))
+    return normalized
+
+
 def _call_with_retry(client: OpenAI, model: str, **kwargs: Any) -> Any:
     """One chat.completions.create call with light retry on transient errors."""
     last_exc: Exception | None = None
@@ -232,12 +282,17 @@ def complete_structured(
     plus a schema-hint system message. The returned content is JSON-parsed and
     validated through ``response_model``; the validated instance is returned.
     """
-    client = client or make_client(settings)
+    client = client or make_judge_client(settings)
     model = settings.judge_model
 
-    # Pass raw dicts so unknown keys (cache_control on content parts) survive the
-    # SDK's serialization untouched.
-    base_messages: list[Any] = list(messages)
+    # For OpenRouter (Anthropic) pass raw dicts so unknown keys (cache_control on
+    # content parts) survive the SDK's serialization untouched. For any other
+    # provider (Ollama / non-Anthropic) flatten list-of-parts content to a plain
+    # string and drop cache_control, which generic endpoints can't use.
+    if settings.judge_provider == "openrouter":
+        base_messages: list[Any] = list(messages)
+    else:
+        base_messages = _normalize_for_non_anthropic(messages)
 
     # --- Attempt 1: strict json_schema -------------------------------------
     try:

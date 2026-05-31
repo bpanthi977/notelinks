@@ -1,10 +1,12 @@
 """The transport-agnostic core (design §2).
 
-An :class:`Engine` owns the long-lived state — ONE shared :class:`OpenAI` client
-(built once via :func:`notelinks.providers.llm.make_client`, reused for both
-embeddings and the judge since both providers share the same OpenRouter client)
-and ONE long-lived :class:`~notelinks.index.store.Store` — and exposes the two
-verbs the adapters drive:
+An :class:`Engine` owns the long-lived state — TWO per-role :class:`OpenAI`
+clients (an ``embedding_client``, ALWAYS OpenRouter via
+:func:`notelinks.providers.embeddings.make_client`, and a ``judge_client``,
+routed by ``settings.judge_provider`` via
+:func:`notelinks.providers.llm.make_judge_client` to OpenRouter or a local Ollama
+endpoint — T18) and ONE long-lived :class:`~notelinks.index.store.Store` — and
+exposes the two verbs the adapters drive:
 
 * :meth:`refresh` — incremental corpus refresh (cheap when nothing changed).
 * :meth:`suggest` — the full pipeline for one note buffer, returning the wire
@@ -31,7 +33,7 @@ from notelinks.org.chunk import chunk_note
 from notelinks.org.parse import parse_note
 from notelinks.pipeline.judge import judge_candidates
 from notelinks.pipeline.retrieve import retrieve_candidates
-from notelinks.providers import llm
+from notelinks.providers import embeddings, llm
 from notelinks.providers.embeddings import embed_texts
 
 logger = logging.getLogger(__name__)
@@ -44,25 +46,41 @@ class Engine:
 
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
-        # ONE shared OpenAI client. Built lazily so an Engine can be constructed
-        # (and ``refresh`` driven with a monkeypatched embedder in tests) without
-        # an API key. The client is injected into every embedding + judge call.
-        self._client = None
+        # TWO per-role OpenAI clients, built lazily so an Engine can be
+        # constructed (and ``refresh`` driven with a monkeypatched embedder in
+        # tests) without any key. ``embedding_client`` is ALWAYS OpenRouter;
+        # ``judge_client`` is routed by ``settings.judge_provider`` (OpenRouter or
+        # local Ollama — T18). Built once and injected into every call.
+        self._embedding_client = None
+        self._judge_client = None
         # The Store is the long-lived Chroma handle — opened once, reused.
         self.store = Store(settings)
 
     @property
-    def client(self):
-        """The shared OpenAI client, built once on first real provider use.
+    def embedding_client(self):
+        """The OpenRouter embedding client, built once on first real use.
 
-        Both ``providers/embeddings`` and ``providers/llm`` build an identical
-        OpenRouter-backed client, so one handle serves both. Lazily constructed
-        so importing/constructing the engine never needs a key (tests that
-        monkeypatch ``embed_texts`` / ``complete_structured`` never trigger it).
+        Embeddings ALWAYS go through OpenRouter (so the Chroma index is provider-
+        stable), so this requires OPENROUTER_API_KEY even when the judge is local.
+        Lazily constructed so importing/constructing the engine never needs a key
+        (tests that monkeypatch ``embed_texts`` never trigger it).
         """
-        if self._client is None:
-            self._client = llm.make_client(self.settings)
-        return self._client
+        if self._embedding_client is None:
+            self._embedding_client = embeddings.make_client(self.settings)
+        return self._embedding_client
+
+    @property
+    def judge_client(self):
+        """The judge client, built once on first real use, routed by provider.
+
+        ``settings.judge_provider`` selects OpenRouter (default) or a local Ollama
+        endpoint; with Ollama no OpenRouter key is required for the judge. Lazily
+        constructed so tests that monkeypatch ``complete_structured`` never trigger
+        it.
+        """
+        if self._judge_client is None:
+            self._judge_client = llm.make_judge_client(self.settings)
+        return self._judge_client
 
     def refresh(self, *, rebuild: bool = False) -> dict:
         """Incrementally refresh the corpus index (design §7).
@@ -73,7 +91,7 @@ class Engine:
         ``chunks``).
         """
         stats = build.refresh(
-            self.store, self.settings, client=self.client, rebuild=rebuild
+            self.store, self.settings, client=self.embedding_client, rebuild=rebuild
         )
         logger.info(
             "refresh: indexed=%d reindexed=%d skipped=%d deleted=%d chunks=%d (rebuild=%s)",
@@ -117,7 +135,9 @@ class Engine:
         # 3. Query chunks come from the buffer (unsaved edits count).
         source_chunks = chunk_note(note, self.settings)
         source_embeddings = embed_texts(
-            [c.embed_text for c in source_chunks], self.settings, client=self.client
+            [c.embed_text for c in source_chunks],
+            self.settings,
+            client=self.embedding_client,
         )
         logger.info(
             "suggest: note=%s (%r) chunked into %d source chunks",
@@ -149,7 +169,7 @@ class Engine:
 
         # 5. Judge → raw suggestions.
         raw_suggestions = judge_candidates(
-            candidates, note, self.store, self.settings, client=self.client
+            candidates, note, self.store, self.settings, client=self.judge_client
         )
         logger.info("suggest: judge returned %d raw suggestions", len(raw_suggestions))
 

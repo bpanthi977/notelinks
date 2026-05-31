@@ -13,6 +13,7 @@ ignored so importing this module never fails in a foreign environment.
 
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -42,10 +43,26 @@ class Settings(BaseSettings):
     openrouter_api_key: str = ""
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
 
+    # --- Judge provider routing (T18) ------------------------------------------
+    # Which backend serves the JUDGE. "openrouter" (default) keeps byte-for-byte
+    # behaviour: Anthropic via OpenRouter with prompt caching. "ollama" routes the
+    # judge to a local Ollama OpenAI-compatible endpoint. EMBEDDINGS ALWAYS use
+    # OpenRouter regardless of this setting (so the Chroma index is untouched and
+    # OPENROUTER_API_KEY is still required for embeddings even with a local judge).
+    judge_provider: Literal["openrouter", "ollama"] = Field(
+        default="openrouter", validation_alias="NOTELINKS_JUDGE_PROVIDER"
+    )
+    # Local Ollama OpenAI-compatible base URL; used only when judge_provider="ollama".
+    ollama_base_url: str = Field(
+        default="http://localhost:11434/v1", validation_alias="OLLAMA_BASE_URL"
+    )
+
     # --- Models ----------------------------------------------------------------
     embedding_model: str = "openai/text-embedding-3-small"
     embedding_dim: int = 1536
-    # Latest Claude Sonnet OpenRouter slug; trivially swappable to a newer slug.
+    # The JUDGE model slug. With judge_provider="openrouter" this is an OpenRouter
+    # slug (e.g. anthropic/claude-sonnet-4.5). With judge_provider="ollama" set it
+    # to your local Ollama tag (e.g. gemma3n:e2b) via the JUDGE_MODEL env var.
     judge_model: str = "anthropic/claude-sonnet-4.5"
 
     # --- Paths -----------------------------------------------------------------
