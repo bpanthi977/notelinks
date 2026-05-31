@@ -43,7 +43,7 @@ ENV is an already-built envelope alist.  `content' is bound for BODY."
      (with-temp-buffer
        (insert content)
        (org-mode)
-       (cl-letf (((symbol-function 'notelinks--show-legend) #'ignore)
+       (cl-letf (((symbol-function 'notelinks--show-panel) #'ignore)
                  ((symbol-function 'notelinks--report) (lambda (&rest _) nil)))
          (notelinks--on-result (current-buffer) ,env))
        ,@body)))
@@ -185,13 +185,83 @@ ENV is an already-built envelope alist.  `content' is bound for BODY."
     (should-error (notelinks-jump-to-target) :type 'user-error)))
 
 (ert-deftest notelinks-test-refresh-info-is-safe ()
-  "Navigating (which forces an eldoc refresh) must not error."
+  "Navigating (which refreshes the info panel) must not error."
   (notelinks-test--with-review (notelinks-test--read "epistemic_uncertainty.org")
       (notelinks-test--fixture-env)
     (notelinks--goto-first)
     (notelinks-next)
     (notelinks-prev)
     (should (notelinks--at-point))))
+
+;;;; Info panel
+
+(ert-deftest notelinks-test-panel-text-has-info-and-keys ()
+  (let ((s (notelinks--make-sug
+            (notelinks-test--sug "p" 4 "beta" "one " " two"))))
+    (let ((txt (notelinks--panel-text s)))
+      (should (string-match-p "analogous-mechanism" txt))   ; type
+      (should (string-match-p "★4" txt))                    ; confidence
+      (should (string-match-p "a accept" txt)))             ; key legend
+    ;; nil suggestion still shows the legend plus a hint
+    (let ((txt (notelinks--panel-text nil)))
+      (should (string-match-p "move onto" txt))
+      (should (string-match-p "q quit" txt)))))
+
+;;;; HTTP backend
+
+(ert-deftest notelinks-test-http-body-extracts-decoded-body ()
+  (with-temp-buffer
+    (set-buffer-multibyte nil)
+    (insert "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n")
+    (insert (encode-coding-string "{\"note\":\"café\"}" 'utf-8))
+    (should (string= "{\"note\":\"café\"}" (notelinks--http-body)))))
+
+(ert-deftest notelinks-test-http-request-body-roundtrips ()
+  (let* ((body (json-encode `((buffer . ,"café — prediction error"))))
+         (parsed (json-parse-string body :object-type 'alist)))
+    (should (string= "café — prediction error" (alist-get 'buffer parsed)))))
+
+(ert-deftest notelinks-test-http-callback-routes-to-review ()
+  "A simulated 200 response drives the same review pipeline as the CLI."
+  (let ((json (notelinks-test--read "sample_output.json"))
+        (content (notelinks-test--read "epistemic_uncertainty.org")))
+    (with-temp-buffer
+      (insert content)
+      (org-mode)
+      (let ((src (current-buffer))
+            (http (generate-new-buffer " *notelinks-test-http*")))
+        (with-current-buffer http
+          (set-buffer-multibyte nil)
+          (setq-local url-http-response-status 200)
+          (insert "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n")
+          (insert (encode-coding-string json 'utf-8)))
+        (cl-letf (((symbol-function 'notelinks--show-panel) #'ignore)
+                  ((symbol-function 'notelinks--report) (lambda (&rest _) nil)))
+          (with-current-buffer http
+            (notelinks--http-callback nil src)))   ; status nil ⇒ no :error
+        (should-not (buffer-live-p http))           ; callback cleans up its buffer
+        (should (= 4 (length notelinks--suggestions)))))))
+
+(ert-deftest notelinks-test-http-callback-reports-non-2xx ()
+  (let ((src (get-buffer-create " *notelinks-test-src*"))
+        (http (generate-new-buffer " *notelinks-test-http*"))
+        (failed nil))
+    (with-current-buffer http
+      (set-buffer-multibyte nil)
+      (setq-local url-http-response-status 500)
+      (insert "HTTP/1.1 500 Internal Server Error\r\n\r\nboom"))
+    (cl-letf (((symbol-function 'notelinks--fail)
+               (lambda (title _detail) (setq failed title))))
+      (with-current-buffer http (notelinks--http-callback nil src)))
+    (should (string-match-p "HTTP 500" failed))
+    (kill-buffer src)))
+
+(ert-deftest notelinks-test-backend-default-and-validation ()
+  (should (eq 'cli notelinks-backend))
+  (with-temp-buffer
+    (org-mode)
+    (let ((notelinks-backend 'bogus))
+      (should-error (notelinks-suggest) :type 'user-error))))
 
 (provide 'notelinks-test)
 ;;; notelinks-test.el ends here

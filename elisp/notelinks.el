@@ -24,6 +24,8 @@
 (require 'seq)
 (require 'subr-x)
 (require 'json)
+(require 'url)
+(require 'url-http)
 
 ;;;; Customization
 
@@ -32,10 +34,21 @@
   :group 'org
   :prefix "notelinks-")
 
+(defcustom notelinks-backend 'cli
+  "How to reach the engine.
+`cli'  — spawn `notelinks suggest' per query (cold start + index walk).
+`http' — POST to a running `notelinks serve' daemon (warm, fast)."
+  :type '(choice (const :tag "CLI subprocess" cli)
+                 (const :tag "HTTP daemon" http)))
+
 (defcustom notelinks-command '("notelinks")
   "Engine command as a list: program followed by leading arguments.
-For example `(\"uv\" \"run\" \"notelinks\")'."
+For example `(\"uv\" \"run\" \"notelinks\")'.  Used by the `cli' backend."
   :type '(repeat string))
+
+(defcustom notelinks-server-url "http://127.0.0.1:8765"
+  "Base URL of the `notelinks serve' daemon.  Used by the `http' backend."
+  :type 'string)
 
 (defcustom notelinks-corpus-dir nil
   "Corpus root passed to the engine as `--corpus'.
@@ -60,8 +73,14 @@ When nil the engine falls back to its own NOTELINKS_CORPUS_DIR."
 (defvar-local notelinks--suggestions nil
   "List of live `notelinks-sug' structs being reviewed in this buffer.")
 
-(defvar-local notelinks--legend-window nil
-  "Side window showing the key legend during a review session.")
+(defvar-local notelinks--info-window nil
+  "Bottom side window showing the current suggestion's info + key legend.")
+
+(defvar-local notelinks--panel-current nil
+  "The suggestion last rendered in the info panel (to avoid needless redraws).")
+
+(defconst notelinks--panel-buffer-name "*notelinks-review*"
+  "Name of the buffer shown in the bottom info/keys side window.")
 
 ;; Forward declarations (defined fully near the bottom of the file).
 (defvar notelinks-overlay-map)
@@ -85,15 +104,27 @@ When nil the engine falls back to its own NOTELINKS_CORPUS_DIR."
 
 ;;;###autoload
 (defun notelinks-suggest ()
-  "Query the engine for link suggestions on the current buffer and review them."
+  "Query the engine for link suggestions on the current buffer and review them.
+Dispatches on `notelinks-backend' (`cli' subprocess or `http' daemon); both
+transports feed the same review pipeline."
   (interactive)
   (unless (derived-mode-p 'org-mode)
     (user-error "notelinks: not an Org buffer"))
   (when notelinks--suggestions
     (user-error "notelinks: a review is already in progress (quit it first)"))
-  (let* ((src (current-buffer))
-         (text (buffer-substring-no-properties (point-min) (point-max)))
-         (corpus (notelinks--corpus-dir))
+  (let ((src (current-buffer))
+        (text (buffer-substring-no-properties (point-min) (point-max))))
+    (pcase notelinks-backend
+      ('cli (notelinks--start-cli src text))
+      ('http (notelinks--start-http src text))
+      (other (user-error "notelinks: invalid notelinks-backend %S" other)))
+    (notelinks--set-status src " ⟳notelinks")
+    (message "notelinks: querying corpus…")))
+
+;;;; Transport: CLI subprocess
+
+(defun notelinks--start-cli (src text)
+  (let* ((corpus (notelinks--corpus-dir))
          (program (car notelinks-command))
          (args (append (cdr notelinks-command)
                        (list "suggest")
@@ -112,9 +143,7 @@ When nil the engine falls back to its own NOTELINKS_CORPUS_DIR."
     (process-put proc 'notelinks-stdout stdout)
     (process-put proc 'notelinks-stderr stderr)
     (process-send-string proc text)
-    (process-send-eof proc)
-    (notelinks--set-status src " ⟳notelinks")
-    (message "notelinks: querying corpus…")))
+    (process-send-eof proc)))
 
 (defun notelinks--sentinel (proc _event)
   (when (memq (process-status proc) '(exit signal))
@@ -128,32 +157,120 @@ When nil the engine falls back to its own NOTELINKS_CORPUS_DIR."
            ((not (buffer-live-p src))
             (message "notelinks: source buffer gone, discarding result"))
            ((zerop code)
-            (notelinks--handle-json src (with-current-buffer stdout (buffer-string)) stderr))
-           (t (notelinks--show-error stderr code nil)))
+            (notelinks--handle-json src (with-current-buffer stdout (buffer-string))))
+           (t (notelinks--fail (format "engine exited with %d" code)
+                               (with-current-buffer stderr (buffer-string)))))
         (when (buffer-live-p stdout) (kill-buffer stdout))
         (when (buffer-live-p stderr) (kill-buffer stderr))))))
 
-(defun notelinks--handle-json (src json stderr)
+;;;; Transport: HTTP daemon (`notelinks serve')
+
+(defun notelinks--server-url (path)
+  (concat (string-trim-right notelinks-server-url "/") path))
+
+(defun notelinks--http-body ()
+  "Return the (decoded) response body of the current `url-retrieve' buffer."
+  (save-excursion
+    (goto-char (point-min))
+    (let* ((beg (or (and (boundp 'url-http-end-of-headers)
+                         (markerp url-http-end-of-headers)
+                         (marker-position url-http-end-of-headers))
+                    (and (re-search-forward "\r?\n\r?\n" nil t) (point))
+                    (point-min)))
+           (s (buffer-substring-no-properties beg (point-max))))
+      ;; Real url buffers are unibyte (raw bytes) → decode; test buffers may be
+      ;; multibyte already → leave as-is.
+      (if (multibyte-string-p s) s (decode-coding-string s 'utf-8)))))
+
+(defun notelinks--start-http (src text)
+  (let ((url-request-method "POST")
+        (url-request-extra-headers '(("Content-Type" . "application/json")))
+        (url-request-data (encode-coding-string
+                           (json-encode `((buffer . ,text))) 'utf-8)))
+    (url-retrieve (notelinks--server-url "/suggest")
+                  #'notelinks--http-callback (list src) t t)))
+
+(defun notelinks--http-callback (status src)
+  (let ((http-buf (current-buffer)))
+    (unwind-protect
+        (progn
+          (notelinks--clear-status src)
+          (cond
+           ((not (buffer-live-p src))
+            (message "notelinks: source buffer gone, discarding result"))
+           ((plist-get status :error)
+            (notelinks--fail (format "cannot reach %s" notelinks-server-url)
+                             (format "%S" (plist-get status :error))))
+           (t
+            (let ((code (and (boundp 'url-http-response-status) url-http-response-status))
+                  (body (notelinks--http-body)))
+              (if (and (integerp code) (<= 200 code 299))
+                  (notelinks--handle-json src body)
+                (notelinks--fail (format "HTTP %s from %s" code notelinks-server-url) body))))))
+      (when (buffer-live-p http-buf) (kill-buffer http-buf)))))
+
+;;;; Shared: parse & dispatch / errors
+
+(defun notelinks--handle-json (src json)
   (let ((env (condition-case nil
                  (json-parse-string json :object-type 'alist :array-type 'list
                                     :null-object nil :false-object nil)
                (error nil))))
     (if env
         (notelinks--on-result src env)
-      (notelinks--show-error stderr 0 json))))
+      (notelinks--fail "engine returned invalid JSON" json))))
 
-(defun notelinks--show-error (stderr code json)
-  (let ((buf (get-buffer-create "*notelinks-error*"))
-        (err (and (buffer-live-p stderr) (with-current-buffer stderr (buffer-string)))))
+(defun notelinks--fail (title detail)
+  (let ((buf (get-buffer-create "*notelinks-error*")))
     (with-current-buffer buf
       (let ((inhibit-read-only t))
         (erase-buffer)
-        (insert (format "notelinks engine error (exit %s)\n\n" code))
-        (when (and err (not (string-empty-p err))) (insert "stderr:\n" err "\n"))
-        (when (and json (not (string-empty-p json))) (insert "\nstdout (not valid JSON):\n" json)))
+        (insert "notelinks: " title "\n")
+        (when (and detail (not (string-empty-p detail)))
+          (insert "\n" detail (if (string-suffix-p "\n" detail) "" "\n"))))
       (special-mode))
-    (display-buffer buf)
-    (message "notelinks: engine error (see *notelinks-error*)")))
+    (display-buffer buf))
+  (message "notelinks: %s (see *notelinks-error*)" title))
+
+;;;; Server commands (http backend)
+
+(defun notelinks--http-sync (method path &optional body)
+  "Send a synchronous request to the daemon; return the parsed JSON alist.
+BODY is a JSON string (for POST).  Signals on connection failure or non-2xx."
+  (let ((url-request-method method)
+        (url-request-extra-headers (and body '(("Content-Type" . "application/json"))))
+        (url-request-data (and body (encode-coding-string body 'utf-8)))
+        (buf (url-retrieve-synchronously (notelinks--server-url path) t t 10)))
+    (unless buf (error "no response from %s" notelinks-server-url))
+    (unwind-protect
+        (with-current-buffer buf
+          (let ((code (and (boundp 'url-http-response-status) url-http-response-status))
+                (resp (notelinks--http-body)))
+            (unless (and (integerp code) (<= 200 code 299))
+              (error "HTTP %s: %s" code resp))
+            (json-parse-string resp :object-type 'alist :null-object nil :false-object nil)))
+      (when (buffer-live-p buf) (kill-buffer buf)))))
+
+(defun notelinks-server-status ()
+  "Show the daemon's index status (notes/chunks/last refresh); confirms it is up."
+  (interactive)
+  (condition-case e
+      (let ((s (notelinks--http-sync "GET" "/status")))
+        (message "notelinks daemon: %s notes, %s chunks; last refresh %s"
+                 (alist-get 'notes s) (alist-get 'chunks s)
+                 (or (alist-get 'last_refresh s) "—")))
+    (error (message "notelinks daemon unreachable at %s (%s)"
+                    notelinks-server-url (error-message-string e)))))
+
+(defun notelinks-server-refresh (&optional rebuild)
+  "Ask the daemon to refresh its index.  With prefix arg, force a full REBUILD."
+  (interactive "P")
+  (condition-case e
+      (let ((s (notelinks--http-sync
+                "POST" "/refresh"
+                (if rebuild "{\"rebuild\": true}" "{\"rebuild\": false}"))))
+        (message "notelinks daemon refreshed: %s" s))
+    (error (message "notelinks refresh failed: %s" (error-message-string e)))))
 
 ;;;; Link assembly & template filling
 
@@ -300,7 +417,7 @@ where KEPT is plists and DISCARDED is `notelinks-sug' structs."
         (if (null notelinks--suggestions)
             (message "notelinks: no applicable suggestions")
           (notelinks-review-mode 1)
-          (notelinks--show-legend)
+          (notelinks--show-panel)
           (notelinks--goto-first))))))
 
 (defun notelinks--report (kept unanchorable discarded)
@@ -325,7 +442,7 @@ where KEPT is plists and DISCARDED is `notelinks-sug' structs."
            (if unanchorable (format ", %d unanchorable" (length unanchorable)) "")
            (if discarded (format ", %d discarded" (length discarded)) "")))
 
-;;;; Metainfo (eldoc + help-echo)
+;;;; Metainfo (side panel + help-echo)
 
 (defun notelinks--describe (s)
   (let* ((tgt (notelinks-sug-target s))
@@ -342,10 +459,6 @@ where KEPT is plists and DISCARDED is `notelinks-sug' structs."
 
 (defun notelinks--help-echo (_window object _pos)
   (let ((s (overlay-get object 'notelinks-sug)))
-    (and s (notelinks--describe s))))
-
-(defun notelinks--eldoc (&rest _)
-  (let ((s (notelinks--at-point)))
     (and s (notelinks--describe s))))
 
 ;;;; Navigation
@@ -365,20 +478,9 @@ where KEPT is plists and DISCARDED is `notelinks-sug' structs."
       (sort l (lambda (a b) (< (overlay-start (notelinks-sug-overlay a))
                                (overlay-start (notelinks-sug-overlay b))))))))
 
-(defun notelinks--refresh-info ()
-  "Surface the metainfo for the suggestion at point immediately.
-Forces an eldoc refresh so the popup updates the instant a navigation
-command (n/p/j/accept) lands point on a suggestion, rather than waiting
-for the idle timer."
-  (cond
-   ((and (bound-and-true-p eldoc-mode) (commandp 'eldoc))
-    (ignore-errors (eldoc t)))
-   (t (let ((s (notelinks--at-point)))
-        (when s (message "%s" (notelinks--describe s)))))))
-
 (defun notelinks--goto (s)
   (goto-char (overlay-start (notelinks-sug-overlay s)))
-  (notelinks--refresh-info))
+  (notelinks--update-panel))
 
 (defun notelinks--goto-first ()
   (let ((o (notelinks--ordered)))
@@ -484,33 +586,61 @@ for the idle timer."
   (dolist (s notelinks--suggestions)
     (when (notelinks-sug-overlay s) (delete-overlay (notelinks-sug-overlay s))))
   (setq notelinks--suggestions nil)
-  (notelinks--hide-legend)
+  (notelinks--hide-panel)
   (when notelinks-review-mode (notelinks-review-mode -1))
   (message "notelinks: review done"))
 
-;;;; Legend
+;;;; Info / keys side panel
 
-(defun notelinks--legend-text ()
-  "notelinks review — keys (active while point is on a suggestion):
-  a accept   r reject   n next   p previous   j jump to target   q quit
-elsewhere: C-c C-n next   C-c C-p prev   C-c C-j jump   C-c C-q quit")
+(defconst notelinks--panel-keys
+  "  a accept   r reject   n next   p previous   j jump   q quit
+  (off-overlay: C-c C-n / C-c C-p / C-c C-j / C-c C-q)"
+  "Key legend shown at the bottom of the info panel.")
 
-(defun notelinks--show-legend ()
-  (let ((buf (get-buffer-create "*notelinks-keys*")))
+(defun notelinks--panel-text (s)
+  "Text for the panel: suggestion S's details (or a hint) plus the key legend."
+  (concat (if s
+              (notelinks--describe s)
+            "(move onto a highlighted suggestion to see its details)")
+          "\n\n" notelinks--panel-keys))
+
+(defun notelinks--render-panel (s)
+  "Write suggestion S's panel text into the panel buffer."
+  (let ((buf (get-buffer-create notelinks--panel-buffer-name)))
     (with-current-buffer buf
       (let ((inhibit-read-only t))
         (erase-buffer)
-        (insert (notelinks--legend-text)))
+        (insert (notelinks--panel-text s))
+        (goto-char (point-min)))
       (setq buffer-read-only t)
       (setq-local mode-line-format nil))
-    (setq notelinks--legend-window
-          (display-buffer-in-side-window buf '((side . bottom) (window-height . 4))))))
+    buf))
 
-(defun notelinks--hide-legend ()
-  (when (window-live-p notelinks--legend-window)
-    (delete-window notelinks--legend-window))
-  (setq notelinks--legend-window nil)
-  (when-let ((buf (get-buffer "*notelinks-keys*")))
+(defun notelinks--show-panel ()
+  "Open the bottom side window with the info/keys panel."
+  (setq notelinks--panel-current :none)        ; force the first real render
+  (setq notelinks--info-window
+        (display-buffer-in-side-window
+         (notelinks--render-panel nil)
+         '((side . bottom) (window-height . 8)))))
+
+(defun notelinks--update-panel ()
+  "Refresh the panel to show the suggestion at point, if it changed.
+Bound to `post-command-hook' (buffer-local) and called after programmatic
+moves, so the target info tracks point inside the existing side window —
+it never pops its own buffer over the note being edited."
+  (when notelinks--info-window
+    (let ((s (notelinks--at-point)))
+      (unless (eq s notelinks--panel-current)
+        (setq notelinks--panel-current s)
+        (notelinks--render-panel s)))))
+
+(defun notelinks--hide-panel ()
+  (when (window-live-p notelinks--info-window)
+    (delete-window notelinks--info-window))
+  (setq notelinks--info-window nil
+        notelinks--panel-current nil)
+  (when-let ((buf (get-buffer notelinks--panel-buffer-name)))
     (kill-buffer buf)))
 
 ;;;; Keymaps & review mode
@@ -540,14 +670,8 @@ elsewhere: C-c C-n next   C-c C-p prev   C-c C-j jump   C-c C-q quit")
   :lighter " NoteLinks"
   :keymap notelinks-review-mode-map
   (if notelinks-review-mode
-      (progn
-        (if (boundp 'eldoc-documentation-functions)
-            (add-hook 'eldoc-documentation-functions #'notelinks--eldoc nil t)
-          (setq-local eldoc-documentation-function #'notelinks--eldoc))
-        (eldoc-mode 1))
-    (if (boundp 'eldoc-documentation-functions)
-        (remove-hook 'eldoc-documentation-functions #'notelinks--eldoc t)
-      (kill-local-variable 'eldoc-documentation-function))))
+      (add-hook 'post-command-hook #'notelinks--update-panel nil t)
+    (remove-hook 'post-command-hook #'notelinks--update-panel t)))
 
 (provide 'notelinks)
 ;;; notelinks.el ends here

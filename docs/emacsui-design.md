@@ -72,19 +72,25 @@ overlay's own `keymap` property:
 - Entry jumps point to the first suggestion; `a`/`r` auto-advance, so the user
   stays "on" suggestions throughout normal flow. If they wander off to edit,
   they return by moving onto a suggestion or via the `C-c` bindings.
-- An **ispell-style legend buffer** (small window) shows the `a/r/n/p/q` keys
-  with one-line descriptions for the duration of the session; it closes on quit
-  / when no suggestions remain.
+- An **ispell-style bottom side window** (`*notelinks-review*`) shows the
+  `a/r/n/p/j/q` keys for the duration of the session, *and* the current
+  suggestion's metainfo (§4). It closes on quit / when no suggestions remain.
 
-## 4. Metainfo popup
+## 4. Metainfo — bottom info panel
 
-Uses **eldoc / `help-echo`** — no posframe.
+The current suggestion's details render **into the same bottom side window as
+the key legend** (§3), not a separate popup. This was a deliberate change from
+an earlier eldoc-buffer approach: eldoc would pop its own `*eldoc*` window over
+the note being edited. Keeping info + keys in one fixed side window never hides
+the working buffer.
 
-- Each overlay carries a `help-echo` function returning a formatted block:
-  **type**, **confidence (1–5)**, **why**, **target** (note title + heading), and
-  a snippet of the **target excerpt**.
-- Surfaced via `help-at-pt` on point-idle (echo area) and as a tooltip on mouse
-  hover; integrates with eldoc where available.
+- Panel content: **type**, **confidence (1–5)**, **why**, **target** (note title
+  + heading), a snippet of the **target excerpt**, then the key legend.
+- It tracks point via a buffer-local `post-command-hook` (and an explicit update
+  after programmatic moves), re-rendering only when the suggestion under point
+  changes. Off a suggestion it shows a hint plus the legend.
+- Each overlay also keeps a `help-echo` function (same content) for the mouse
+  tooltip — that never opens a window, so it stays.
 
 ## 5. Navigation order
 
@@ -106,27 +112,44 @@ lower-confidence one (reported as discarded, §9).
 
 ## 7. Engine invocation
 
-- **Mechanism:** `make-process`; write the **whole buffer** to the process
-  stdin, close it, collect stdout; the process **sentinel** parses the JSON on
-  exit. Fully **async** — a spinner / mode-line indicator runs while the call is
-  in flight.
-- **Editing during the call is allowed.** Results are re-anchored against the
-  buffer's *current* text on receipt (§8), so drift is fine; anything that won't
-  resolve becomes unanchorable (§9).
-- **No special initial-build path.** `suggest` auto-refreshes the corpus; the
-  first ever run is simply slower and is covered by the same spinner. (No
-  separate "index" command in the UI.)
-- **No file argument.** `suggest` is invoked with the buffer on stdin only; the
-  engine parses the note's `:ID:` (identity + self/cyclic exclusion) from the
-  stdin buffer. This makes **unsaved / new buffers** work without a file on
-  disk. (The engine change tracked in
-  [`task-take-stdin-input.md`](./task-take-stdin-input.md) has landed —
-  `source.file` is gone from the contract and the CLI takes no path arg.)
-- **Configuration:**
-  - `notelinks-command` — list, default `("notelinks")`; e.g. set to
-    `("uv" "run" "notelinks")`.
-  - `notelinks-corpus-dir` — passed as `--corpus`; falls back to the engine's
-    `NOTELINKS_CORPUS_DIR` env when nil.
+Two interchangeable transports, selected by `notelinks-backend`; **both feed the
+identical result pipeline** (§8) — only how the `Envelope` JSON arrives differs.
+
+**`cli` (default) — subprocess.** `make-process` runs `notelinks suggest
+[--corpus DIR]`; the **whole buffer** goes to stdin, stdout is collected, and
+the **sentinel** parses the JSON on exit. Each query pays cold-start + a full
+incremental corpus walk. (No separate initial-build command — the first run is
+just slower, covered by the same status indicator.)
+
+**`http` — daemon.** POST the buffer to a running `notelinks serve` daemon:
+`POST {base}/suggest` with body `{"buffer": <org text>}`, parsed in the
+`url-retrieve` callback. The daemon holds a **warm** `Engine` and watches the
+corpus, so a query is a pure read — much faster, no per-keystroke index walk.
+Convenience commands hit the other endpoints: `notelinks-server-status`
+(`GET /status`) and `notelinks-server-refresh` (`POST /refresh`).
+
+Common to both:
+
+- **No file argument.** Only the buffer is sent; the engine parses the note's
+  `:ID:` (identity + self/cyclic exclusion) from it, so **unsaved / new buffers**
+  work. (`source.file` was dropped from the contract — see
+  [`task-take-stdin-input.md`](./task-take-stdin-input.md).)
+- **Fully async**, with a mode-line status indicator while in flight.
+- **Editing during the call is allowed** — results are re-anchored against the
+  buffer's *current* text on receipt (§8); anything that won't resolve becomes
+  unanchorable (§9).
+- **Errors** (nonzero exit / connection failure / non-2xx / bad JSON) surface in
+  a `*notelinks-error*` buffer with the detail.
+
+### Configuration
+
+- `notelinks-backend` — `cli` (default) | `http`.
+- `notelinks-command` — list, default `("notelinks")`; e.g. `("uv" "run"
+  "notelinks")`. (`cli` backend.)
+- `notelinks-corpus-dir` — passed as `--corpus`; falls back to the engine's
+  `NOTELINKS_CORPUS_DIR` env when nil. (`cli` backend.)
+- `notelinks-server-url` — daemon base URL, default `http://127.0.0.1:8765`.
+  (`http` backend.)
 
 ## 8. Anchor resolution & markers
 
@@ -153,8 +176,8 @@ drift and warn; re-anchoring still relies on `expect`/`before`/`after`.
 
 ## 9. Errors, empty results, unanchorable
 
-- **Process error** (nonzero exit) or **malformed JSON** → show stderr in a
-  dedicated error buffer; abort the session.
+- **Transport error** (nonzero CLI exit, HTTP connection failure / non-2xx) or
+  **malformed JSON** → show the detail in `*notelinks-error*`; abort the session.
 - **Zero suggestions** → echo-area message, no session.
 - **Unanchorable** suggestions and **overlap-discarded** suggestions → echo-area
   count plus a `*notelinks*` listing (type, why, target) so the user can act on
@@ -164,28 +187,33 @@ drift and warn; re-anchoring still relies on `expect`/`before`/`after`.
 
 ```
 M-x notelinks-suggest
-  → spawn engine (buffer → stdin), spinner
+  → query engine (cli subprocess or http daemon), buffer → engine; status indicator
   → on result:
       resolve anchors → markers
       insert pending insert-templates
       create overlays (face + keymap + help-echo)
-      enable notelinks-review-mode (buffer-local)
-      show legend buffer
+      enable notelinks-review-mode (buffer-local; post-command-hook drives the panel)
+      show info/keys side panel
       jump point to first suggestion
-  → user accepts/rejects per suggestion (auto-advance)
+  → user accepts/rejects per suggestion (auto-advance; panel tracks point)
   → when none remain, or on quit:
       finalize/revert, clear overlays + markers
       disable notelinks-review-mode
-      close legend buffer
+      close info/keys panel
 ```
 
 ## 11. Configuration variables (summary)
 
 | var | default | meaning |
 |---|---|---|
-| `notelinks-command` | `("notelinks")` | engine executable + args |
-| `notelinks-corpus-dir` | `nil` | `--corpus`; nil ⇒ engine env |
+| `notelinks-backend` | `cli` | transport: `cli` \| `http` |
+| `notelinks-command` | `("notelinks")` | engine executable + args (`cli`) |
+| `notelinks-corpus-dir` | `nil` | `--corpus`; nil ⇒ engine env (`cli`) |
+| `notelinks-server-url` | `http://127.0.0.1:8765` | daemon base URL (`http`) |
 | `notelinks-navigation-order` | `buffer` | `buffer` \| `confidence` |
+
+Commands: `notelinks-suggest` (review), `notelinks-server-status`,
+`notelinks-server-refresh` (`http` backend).
 
 ## 12. Deferred / out of scope (v1 UI)
 
