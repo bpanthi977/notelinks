@@ -79,6 +79,44 @@ def cached_text(text: str) -> dict[str, Any]:
     }
 
 
+# JSON-Schema validation keywords that Anthropic's structured-output validator
+# (the upstream provider OpenRouter routes Claude to) rejects. Pydantic emits
+# these from ``Field(ge=…, le=…)`` etc. as ``minimum``/``maximum`` on integers;
+# Anthropic returns 400 "For 'integer' type, properties maximum, minimum are not
+# supported". We strip them from the schema we *send* (the constraints are still
+# enforced when we validate the response through the pydantic model). The numeric
+# range keywords are the ones observed to fail; the rest are stripped defensively
+# as Anthropic's strict schema subset is narrow.
+_UNSUPPORTED_SCHEMA_KEYWORDS = frozenset(
+    {
+        "minimum",
+        "maximum",
+        "exclusiveMinimum",
+        "exclusiveMaximum",
+        "multipleOf",
+        "minLength",
+        "maxLength",
+        "pattern",
+        "format",
+        "minItems",
+        "maxItems",
+    }
+)
+
+
+def _strip_unsupported(node: Any) -> Any:
+    """Recursively drop validation keywords Anthropic's schema validator rejects."""
+    if isinstance(node, dict):
+        return {
+            k: _strip_unsupported(v)
+            for k, v in node.items()
+            if k not in _UNSUPPORTED_SCHEMA_KEYWORDS
+        }
+    if isinstance(node, list):
+        return [_strip_unsupported(item) for item in node]
+    return node
+
+
 def _schema_for(response_model: type[BaseModel]) -> dict[str, Any]:
     return response_model.model_json_schema()
 
@@ -89,7 +127,7 @@ def _json_schema_response_format(response_model: type[BaseModel]) -> dict[str, A
         "json_schema": {
             "name": response_model.__name__,
             "strict": True,
-            "schema": _schema_for(response_model),
+            "schema": _strip_unsupported(_schema_for(response_model)),
         },
     }
 
@@ -113,6 +151,43 @@ def _extract_content(completion: Any) -> str:
     if content is None:
         raise ValueError("LLM returned no content (message.content was None)")
     return content
+
+
+def _extract_json(text: str) -> str:
+    """Best-effort: pull the JSON object out of a model response.
+
+    Claude (esp. on the ``json_object`` fallback, which is not as strict as a
+    real ``json_schema`` constraint) tends to wrap its JSON in a ```` ```json ````
+    markdown fence and/or prepend reasoning prose ("Let me analyze..."). The
+    strict-schema path returns bare JSON, so this is a no-op there. We:
+
+    1. strip a fenced code block if present (``` or ```json), else
+    2. slice from the first ``{`` to the last ``}``.
+
+    The result is validated by the caller through the pydantic model, so a wrong
+    guess simply surfaces as a ValidationError (same as before).
+    """
+    stripped = text.strip()
+    # 1. Fenced code block: ```json\n...\n``` or ```\n...\n```
+    if stripped.startswith("```"):
+        body = stripped[3:]
+        # drop an optional language tag on the opening fence line.
+        newline = body.find("\n")
+        if newline != -1:
+            first_line = body[:newline].strip()
+            if first_line == "" or first_line.isalpha():
+                body = body[newline + 1 :]
+        fence_end = body.rfind("```")
+        if fence_end != -1:
+            body = body[:fence_end]
+        stripped = body.strip()
+    # 2. If there is still surrounding prose, slice to the outermost braces.
+    if not stripped.startswith("{"):
+        first = stripped.find("{")
+        last = stripped.rfind("}")
+        if first != -1 and last != -1 and last > first:
+            stripped = stripped[first : last + 1]
+    return stripped
 
 
 def _call_with_retry(client: OpenAI, model: str, **kwargs: Any) -> Any:
@@ -173,7 +248,7 @@ def complete_structured(
             response_format=_json_schema_response_format(response_model),
         )
         content = _extract_content(completion)
-        return response_model.model_validate_json(content)
+        return response_model.model_validate_json(_extract_json(content))
     except (APIStatusError, ValidationError, ValueError, json.JSONDecodeError) as exc:
         # APIStatusError: route rejected strict json_schema (4xx).
         # ValidationError/JSONDecodeError/ValueError: malformed structured output.
@@ -192,4 +267,4 @@ def complete_structured(
         response_format={"type": "json_object"},
     )
     content = _extract_content(completion)
-    return response_model.model_validate_json(content)
+    return response_model.model_validate_json(_extract_json(content))

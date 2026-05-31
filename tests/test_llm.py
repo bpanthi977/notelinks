@@ -161,6 +161,41 @@ def test_falls_back_to_json_object_on_strict_rejection(
     assert "JSON schema" in fake.calls[1]["messages"][0]["content"]
 
 
+def test_strict_schema_strips_unsupported_numeric_constraints(settings: Settings) -> None:
+    """Anthropic via OpenRouter 400s on minimum/maximum for integer types.
+
+    Pydantic emits ``minimum``/``maximum`` for ``confidence: int = Field(ge=1, le=5)``.
+    The strict json_schema we SEND must have those stripped (the constraint is still
+    enforced when we validate the response through the pydantic model).
+    """
+    client, fake = _client_with([_VALID_JUDGE_JSON])
+    llm.complete_structured(
+        [{"role": "user", "content": "x"}], settings, JudgeResponse, client=client
+    )
+    schema = fake.calls[0]["response_format"]["json_schema"]["schema"]
+    schema_text = json.dumps(schema)
+    assert "minimum" not in schema_text
+    assert "maximum" not in schema_text
+    # Structure is otherwise intact.
+    assert "properties" in schema
+
+
+def test_extracts_json_from_markdown_fence(settings: Settings) -> None:
+    """The json_object fallback often returns prose + a ```json fenced block.
+
+    Claude wraps its JSON in reasoning text and/or a markdown code fence; the
+    content must still validate. (Observed live behaviour on the json_object route.)"""
+    fenced = (
+        "Let me analyze each candidate.\n\n```json\n" + _VALID_JUDGE_JSON + "\n```\n"
+    )
+    client, fake = _client_with([fenced])
+    result = llm.complete_structured(
+        [{"role": "user", "content": "x"}], settings, JudgeResponse, client=client
+    )
+    assert isinstance(result, JudgeResponse)
+    assert len(result.suggestions) == 1
+
+
 def test_make_client_requires_api_key() -> None:
     with pytest.raises(RuntimeError, match="openrouter_api_key is empty"):
         llm.make_client(Settings(openrouter_api_key=""))
