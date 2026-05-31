@@ -93,7 +93,7 @@ def corpus(tmp_path, monkeypatch):
     monkeypatch.setattr("notelinks.engine.embed_texts", _fake_embed)
     # Index dir lives under tmp; point Settings at it via env so Settings() picks
     # it up without a corpus override in the index command.
-    monkeypatch.setenv("INDEX_DIR", str(tmp_path / "index"))
+    monkeypatch.setenv("NOTELINKS_INDEX_DIR", str(tmp_path / "index"))
     # Dummy key so the shared client constructs; no request is ever made (faked).
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
     # Judge never accepts — the smoke test only needs valid JSON, not links.

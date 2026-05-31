@@ -14,6 +14,7 @@ ignored so importing this module never fails in a foreign environment.
 from functools import lru_cache
 from pathlib import Path
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -27,6 +28,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
         extra="ignore",  # don't choke on unrelated env vars (AWS_*, etc.)
+        populate_by_name=True,  # allow init by field name even when a field has an alias
     )
 
     # --- Provider (OpenRouter via the OpenAI SDK) ------------------------------
@@ -43,11 +45,16 @@ class Settings(BaseSettings):
     judge_model: str = "anthropic/claude-sonnet-4.5"
 
     # --- Paths -----------------------------------------------------------------
-    # corpus_dir: notes root; CLI may override with --corpus. None => required at
-    # call time (the CLI resolves it from NOTELINKS_CORPUS_DIR / --corpus).
-    corpus_dir: Path | None = None
-    # index_dir: Chroma persistent store location (repo-relative by default).
-    index_dir: Path = Path(".notelinks/index")
+    # corpus_dir: notes root, read from NOTELINKS_CORPUS_DIR; CLI may override with
+    # --corpus. None => required at call time (Engine.suggest guards on it).
+    corpus_dir: Path | None = Field(
+        default=None, validation_alias="NOTELINKS_CORPUS_DIR"
+    )
+    # index_dir: Chroma persistent store location (repo-relative default), read
+    # from NOTELINKS_INDEX_DIR.
+    index_dir: Path = Field(
+        default=Path(".notelinks/index"), validation_alias="NOTELINKS_INDEX_DIR"
+    )
 
     # --- Chunking (token-based, tiktoken) --------------------------------------
     chunk_target_tokens: int = 256
