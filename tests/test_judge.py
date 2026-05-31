@@ -6,6 +6,9 @@ No network: ``llm.complete_structured`` is monkeypatched to return a canned
 
 from __future__ import annotations
 
+import threading
+import time
+
 import notelinks.pipeline.judge as judge_mod
 from notelinks.config import Settings
 from notelinks.models import (
@@ -394,3 +397,225 @@ def test_judge_candidates_groups_by_source_chunk(monkeypatch) -> None:
 
     # c1 and c2 share source SRC-UUID:0; c3 is SRC-UUID:9 => exactly 2 calls.
     assert len(calls) == 2
+
+
+# ---------------------------------------------------------------------------
+# Piece 3: parallelization (thread pool) — determinism, isolation, safety.
+# ---------------------------------------------------------------------------
+
+# A multi-source note whose three source chunks each contain a distinct,
+# verbatim-findable phrase. Offsets are computed from this text so each source
+# chunk's char span exactly covers its sentence.
+MULTI_BUFFER = (
+    "Alpha drives the alpha signal forward. "
+    "Beta tunes the beta loop slowly. "
+    "Gamma resolves the gamma tension fully."
+)
+_PHRASES = ["alpha signal", "beta loop", "gamma tension"]
+
+
+def _multi_note() -> Note:
+    return Note(id="SRC-UUID", path="notes/cur.org", title="Current", text=MULTI_BUFFER)
+
+
+def _multi_candidates() -> list[Candidate]:
+    """One candidate per distinct source chunk (3 groups), each anchorable."""
+    sentences = [
+        "Alpha drives the alpha signal forward.",
+        "Beta tunes the beta loop slowly.",
+        "Gamma resolves the gamma tension fully.",
+    ]
+    candidates: list[Candidate] = []
+    for i, sentence in enumerate(sentences):
+        start = MULTI_BUFFER.index(sentence)
+        source = make_chunk(
+            "SRC-UUID",
+            i,
+            text=sentence,
+            char_start=start,
+            char_end=start + len(sentence),
+            heading_text=f"H{i}",
+            heading_index=i,
+            note_path="notes/cur.org",
+            note_title="Current",
+        )
+        target = make_chunk(
+            f"TGT{i}-UUID",
+            100 + i,
+            text=f"Target body for group {i}.",
+            char_start=0,
+            char_end=20,
+            heading_text=f"TgtH{i}",
+            heading_id=f"TGTHEAD{i}",
+            heading_level=2,
+            heading_index=10 + i,
+            chunk_in_heading=0,
+            note_path=f"notes/t{i}.org",
+            note_title=f"Target {i}",
+        )
+        candidates.append(Candidate(source_chunk=source, target_chunk=target, score=0.5))
+    return candidates
+
+
+def _canned_for(sid: str, candidates: list[Candidate]) -> JudgeResponse:
+    """A per-source canned response wrapping that group's distinct phrase."""
+    # sid is "SRC-UUID:<ordinal>"; map back to the matching candidate/phrase.
+    cand = next(c for c in candidates if c.source_chunk.chunk_id == sid)
+    idx = candidates.index(cand)
+    return JudgeResponse(
+        suggestions=[
+            RawJudgeSuggestion(
+                target_chunk_id=cand.target_chunk.chunk_id,
+                type="elaborates",
+                confidence=3,
+                why=f"resonance for group {idx}",
+                anchor=JudgeAnchor(mode="wrap", expect=_PHRASES[idx]),
+                target_is_note=False,
+            )
+        ]
+    )
+
+
+def _sequential_expectation(
+    candidates: list[Candidate], store, monkeypatch
+) -> list:
+    """Run the judge with a plain (no-sleep) per-source mock = the reference."""
+
+    def plain(messages, settings, response_model, *, client=None):
+        sid = _sid_from_messages(messages, candidates)
+        return _canned_for(sid, candidates)
+
+    monkeypatch.setattr(judge_mod.llm, "complete_structured", plain)
+    return judge_candidates(candidates, _multi_note(), store, Settings(), max_workers=4)
+
+
+def _sid_from_messages(messages, candidates) -> str:
+    """Recover which source chunk a built message set belongs to.
+
+    The per-call suffix embeds the source chunk text; match it back to a sid so
+    the mock routes the correct canned response to the correct group.
+    """
+    suffix = messages[1]["content"][1]["text"]
+    for c in candidates:
+        if c.source_chunk.text in suffix:
+            return c.source_chunk.chunk_id
+    raise AssertionError("could not route message to a source chunk")
+
+
+def test_judge_parallel_stable_order_despite_out_of_order_completion(
+    monkeypatch,
+) -> None:
+    candidates = _multi_candidates()
+    store = FakeStore(None)
+
+    # Reference: sequential expectation (stable group order).
+    expected = _sequential_expectation(candidates, FakeStore(None), monkeypatch)
+    assert [s.id for s in expected] == ["s01", "s02", "s03"]
+
+    # Now a mock that makes the LATER groups finish FIRST: group 0 sleeps longest.
+    n_groups = len(candidates)
+
+    def out_of_order(messages, settings, response_model, *, client=None):
+        sid = _sid_from_messages(messages, candidates)
+        idx = next(
+            i
+            for i, c in enumerate(candidates)
+            if c.source_chunk.chunk_id == sid
+        )
+        # Earlier groups sleep longer => completion order is reversed.
+        time.sleep(0.02 * (n_groups - idx))
+        return _canned_for(sid, candidates)
+
+    monkeypatch.setattr(judge_mod.llm, "complete_structured", out_of_order)
+
+    out = judge_candidates(
+        candidates, _multi_note(), store, Settings(), max_workers=4
+    )
+
+    # Same suggestions, same order, same stable ids as the sequential reference.
+    assert [s.id for s in out] == [s.id for s in expected]
+    assert [s.why for s in out] == [s.why for s in expected]
+    assert [s.target.title for s in out] == [s.target.title for s in expected]
+    assert [s.source_anchor.expect for s in out] == [
+        s.source_anchor.expect for s in expected
+    ]
+    # Concretely: ids are s01..s03 in first-seen group order.
+    assert [s.id for s in out] == ["s01", "s02", "s03"]
+    assert [s.target.title for s in out] == ["Target 0", "Target 1", "Target 2"]
+
+
+def test_judge_parallel_calls_once_per_group(monkeypatch) -> None:
+    candidates = _multi_candidates()
+    store = FakeStore(None)
+    count = {"n": 0}
+    lock = threading.Lock()
+
+    def fake(messages, settings, response_model, *, client=None):
+        with lock:
+            count["n"] += 1
+        sid = _sid_from_messages(messages, candidates)
+        return _canned_for(sid, candidates)
+
+    monkeypatch.setattr(judge_mod.llm, "complete_structured", fake)
+    judge_candidates(candidates, _multi_note(), store, Settings(), max_workers=4)
+
+    # One call per distinct source chunk (3 groups).
+    assert count["n"] == 3
+
+
+def test_judge_parallel_failure_isolation(monkeypatch) -> None:
+    candidates = _multi_candidates()
+    store = FakeStore(None)
+    failing_sid = candidates[1].source_chunk.chunk_id  # middle group fails
+
+    def fake(messages, settings, response_model, *, client=None):
+        sid = _sid_from_messages(messages, candidates)
+        if sid == failing_sid:
+            raise RuntimeError("boom in group 1")
+        return _canned_for(sid, candidates)
+
+    monkeypatch.setattr(judge_mod.llm, "complete_structured", fake)
+
+    out = judge_candidates(
+        candidates, _multi_note(), store, Settings(), max_workers=4
+    )
+
+    # The failing group contributes nothing; the other two still produce
+    # suggestions and the run does not crash. ids stay stable/contiguous.
+    assert [s.id for s in out] == ["s01", "s02"]
+    assert [s.target.title for s in out] == ["Target 0", "Target 2"]
+    assert [s.why for s in out] == ["resonance for group 0", "resonance for group 2"]
+
+
+def test_judge_parallel_thread_safe_per_group_routing(monkeypatch) -> None:
+    candidates = _multi_candidates()
+    store = FakeStore(None)
+    # Record (thread, sid, source_text) seen by each invocation to assert that
+    # inputs are not crossed between concurrent calls.
+    seen: list[tuple[str, str]] = []
+    lock = threading.Lock()
+    barrier = threading.Barrier(len(candidates))
+
+    def fake(messages, settings, response_model, *, client=None):
+        sid = _sid_from_messages(messages, candidates)
+        suffix = messages[1]["content"][1]["text"]
+        cand = next(c for c in candidates if c.source_chunk.chunk_id == sid)
+        # Force genuine concurrency: every call waits until all are in-flight.
+        barrier.wait(timeout=5)
+        with lock:
+            seen.append((sid, suffix))
+        # The suffix carried into this call must be this group's own source text.
+        assert cand.source_chunk.text in suffix
+        return _canned_for(sid, candidates)
+
+    monkeypatch.setattr(judge_mod.llm, "complete_structured", fake)
+
+    out = judge_candidates(
+        candidates, _multi_note(), store, Settings(), max_workers=len(candidates)
+    )
+
+    # Every group routed exactly once, with its own input (no data races).
+    assert sorted(sid for sid, _ in seen) == sorted(
+        c.source_chunk.chunk_id for c in candidates
+    )
+    assert [s.id for s in out] == ["s01", "s02", "s03"]

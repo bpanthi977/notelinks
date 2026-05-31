@@ -131,4 +131,50 @@ context-snippet/locator split in v1.
   → no heading, insert → target-title `link_description`, empty response → no
   suggestions, unanchorable → dropped, grouping → one call per source chunk.
 
+- Parallelization (below): stable-order equivalence under out-of-order
+  completion + stable ids, one call per source-chunk group, failure isolation
+  (one group raising still lets the others produce suggestions), and concurrent
+  per-group input routing (thread-safety, no crossed inputs).
+
 `uv run ruff check` and `uv run pytest tests/test_judge.py` both pass.
+
+## Parallelization
+
+The per-source-chunk LLM calls dominate `judge_candidates` latency and are
+independent and I/O-bound. The OpenAI SDK client is sync but thread-safe for
+concurrent requests, so we run the calls on a
+`concurrent.futures.ThreadPoolExecutor` instead of sequentially.
+
+**Split.** `judge_candidates` now has two phases:
+
+1. **Parallel I/O.** For each source-chunk group, a thread runs only the
+   `_build_messages(...)` + `llm.complete_structured(...)` step (a closure
+   `_call(sid)`). Futures are submitted in first-seen group order; each result
+   is stored in a `dict[str, JudgeResponse]` keyed by source-chunk id.
+2. **Sequential assembly.** After all calls return, anchor resolution,
+   `Suggestion` construction, and id assignment run sequentially — exactly the
+   original logic, unchanged. Assembly stays pure (no I/O), so it is cheap and
+   trivially deterministic.
+
+**`max_workers`.** A `max_workers: int = 8` keyword arg on `judge_candidates`
+caps concurrency (default 8). Scope was kept to this file: it is intentionally
+**not** a `Settings` field today. It could be promoted to a
+`pydantic-settings` config field later (e.g. `judge_max_workers`) if we want it
+tunable via env without touching call sites; deferred to avoid widening T12's
+surface.
+
+**Determinism guarantee.** The returned `list[Suggestion]` and the
+`s01`/`s02`/… ids depend **only** on the original (first-seen) source-chunk
+group order, never on which LLM call finishes first. We achieve this by keying
+results on `sid` during the parallel phase and then iterating `ordered_sids`
+(insertion order of the `groups` dict) during assembly, incrementing the id
+counter only there. A test simulates reversed completion order (earlier groups
+sleep longer) and asserts byte-for-byte the same suggestions, order, and ids as
+a no-sleep sequential reference.
+
+**Failure isolation.** Each future is resolved in its own `try/except`. An
+exception in one group's LLM call is logged via `logger.exception(...)` and that
+group is simply skipped (it contributes no suggestions and leaves no entry in
+the results dict); the remaining groups still produce suggestions and the run
+does not crash. Because ids are assigned during sequential assembly over the
+groups that succeeded, they stay contiguous (`s01`, `s02`, …) with no gaps.

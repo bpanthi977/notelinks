@@ -20,6 +20,8 @@ engine's job (T13, design §10). It returns the raw `list[Suggestion]`.
 
 from __future__ import annotations
 
+import logging
+from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING
 
 from notelinks.models import (
@@ -33,6 +35,8 @@ from notelinks.models import (
     TargetHeading,
 )
 from notelinks.providers import llm
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from openai import OpenAI
@@ -276,6 +280,7 @@ def judge_candidates(
     settings: Settings,
     *,
     client: OpenAI | None = None,
+    max_workers: int = 8,
 ) -> list[Suggestion]:
     """Judge candidates into `Suggestion`s, one LLM call per source chunk.
 
@@ -285,6 +290,19 @@ def judge_candidates(
     full current note) plus a per-call target suffix is sent to
     :func:`llm.complete_structured`, validated as a :class:`JudgeResponse`. The
     judge MAY reject everything (empty list).
+
+    **Parallelism.** The per-source-chunk LLM calls are I/O-bound and the OpenAI
+    SDK client is sync and thread-safe, so they run concurrently on a
+    :class:`~concurrent.futures.ThreadPoolExecutor` (``max_workers``). The work
+    splits cleanly: only the message build + LLM call run in threads; **all**
+    assembly (anchor resolution, `Suggestion` construction, id assignment) runs
+    sequentially afterwards in the original group order. This keeps the output
+    deterministic: the returned list and the ``s01``/``s02``/… ids depend only on
+    first-seen group order, never on which LLM call finishes first.
+
+    **Failure isolation.** An exception in one group's LLM call is logged and that
+    group is skipped (it contributes no suggestions); the other groups still
+    produce results — one slow/failing call cannot abort the whole run.
 
     Each accepted :class:`RawJudgeSuggestion` is anchored via
     :func:`resolve_anchor`. **Fallback choice:** if ``expect`` is not found
@@ -306,18 +324,47 @@ def judge_candidates(
         source_by_id.setdefault(sid, candidate.source_chunk)
         groups.setdefault(sid, []).append(candidate)
 
-    suggestions: list[Suggestion] = []
-    counter = 0
-    for sid, group in groups.items():
-        source_chunk = source_by_id[sid]
-        # Map for resolving the judge's target_chunk_id back to a Candidate.
-        target_by_id = {c.target_chunk.chunk_id: c for c in group}
+    # Stable, original group order — assembly and id assignment key off this.
+    ordered_sids = list(groups)
 
-        messages = _build_messages(note, source_chunk, group, store)
+    def _call(sid: str) -> JudgeResponse:
+        source_chunk = source_by_id[sid]
+        messages = _build_messages(note, source_chunk, groups[sid], store)
         response = llm.complete_structured(
             messages, settings, JudgeResponse, client=client
         )
         assert isinstance(response, JudgeResponse)  # narrow for type-checkers
+        return response
+
+    # Parallel I/O: one LLM call per source chunk. Results are collected keyed by
+    # sid so the order in which calls *finish* never affects the output.
+    responses: dict[str, JudgeResponse] = {}
+    if ordered_sids:
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_to_sid = {
+                executor.submit(_call, sid): sid for sid in ordered_sids
+            }
+            for future, sid in future_to_sid.items():
+                try:
+                    responses[sid] = future.result()
+                except Exception:
+                    # Failure isolation: log and skip this group; others survive.
+                    logger.exception(
+                        "judge LLM call failed for source chunk %s; skipping group",
+                        sid,
+                    )
+
+    # Sequential, pure assembly in the original group order (deterministic ids).
+    suggestions: list[Suggestion] = []
+    counter = 0
+    for sid in ordered_sids:
+        response = responses.get(sid)
+        if response is None:
+            continue  # the group's LLM call failed and was skipped above.
+        group = groups[sid]
+        source_chunk = source_by_id[sid]
+        # Map for resolving the judge's target_chunk_id back to a Candidate.
+        target_by_id = {c.target_chunk.chunk_id: c for c in group}
 
         for raw in response.suggestions:
             candidate = target_by_id.get(raw.target_chunk_id)
