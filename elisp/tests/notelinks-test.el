@@ -171,5 +171,27 @@ ENV is an already-built envelope alist.  `content' is bound for BODY."
       (should (= 1 (length notelinks--suggestions)))
       (should (string= "three four" (notelinks-sug-link-desc (car notelinks--suggestions)))))))
 
+;;;; Keybindings & jump
+
+(ert-deftest notelinks-test-jump-bound ()
+  (should (eq 'notelinks-jump-to-target (lookup-key notelinks-overlay-map "j")))
+  (should (eq 'notelinks-jump-to-target (lookup-key notelinks-review-mode-map (kbd "C-c C-j")))))
+
+(ert-deftest notelinks-test-jump-errors-off-overlay ()
+  (with-temp-buffer
+    (org-mode)
+    (insert "no suggestions here\n")
+    (goto-char (point-min))
+    (should-error (notelinks-jump-to-target) :type 'user-error)))
+
+(ert-deftest notelinks-test-refresh-info-is-safe ()
+  "Navigating (which forces an eldoc refresh) must not error."
+  (notelinks-test--with-review (notelinks-test--read "epistemic_uncertainty.org")
+      (notelinks-test--fixture-env)
+    (notelinks--goto-first)
+    (notelinks-next)
+    (notelinks-prev)
+    (should (notelinks--at-point))))
+
 (provide 'notelinks-test)
 ;;; notelinks-test.el ends here

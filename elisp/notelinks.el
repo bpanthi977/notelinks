@@ -66,6 +66,7 @@ When nil the engine falls back to its own NOTELINKS_CORPUS_DIR."
 ;; Forward declarations (defined fully near the bottom of the file).
 (defvar notelinks-overlay-map)
 (defvar notelinks-review-mode)
+(declare-function org-link-open-from-string "ol" (s &optional arg))
 
 ;;;; Engine invocation
 
@@ -375,8 +376,20 @@ where KEPT is plists and DISCARDED is `notelinks-sug' structs."
       (sort l (lambda (a b) (< (overlay-start (notelinks-sug-overlay a))
                                (overlay-start (notelinks-sug-overlay b))))))))
 
+(defun notelinks--refresh-info ()
+  "Surface the metainfo for the suggestion at point immediately.
+Forces an eldoc refresh so the popup updates the instant a navigation
+command (n/p/j/accept) lands point on a suggestion, rather than waiting
+for the idle timer."
+  (cond
+   ((and (bound-and-true-p eldoc-mode) (commandp 'eldoc))
+    (ignore-errors (eldoc t)))
+   (t (let ((s (notelinks--at-point)))
+        (when s (message "%s" (notelinks--describe s)))))))
+
 (defun notelinks--goto (s)
-  (goto-char (overlay-start (notelinks-sug-overlay s))))
+  (goto-char (overlay-start (notelinks-sug-overlay s)))
+  (notelinks--refresh-info))
 
 (defun notelinks--goto-first ()
   (let ((o (notelinks--ordered)))
@@ -399,6 +412,16 @@ where KEPT is plists and DISCARDED is `notelinks-sug' structs."
          (rest (and cur (cdr (memq cur ordered))))
          (target (or (car rest) (car ordered))))
     (when target (notelinks--goto target))))
+
+(defun notelinks-jump-to-target ()
+  "Follow the suggestion at point to its target note/heading."
+  (interactive)
+  (let ((s (notelinks--at-point)))
+    (unless s (user-error "notelinks: no suggestion at point"))
+    (require 'ol)
+    (let* ((target (notelinks-sug-target s))
+           (link (notelinks--assemble-link target (or (alist-get 'title target) ""))))
+      (org-link-open-from-string link))))
 
 ;;;; Accept / reject / quit
 
@@ -480,8 +503,8 @@ where KEPT is plists and DISCARDED is `notelinks-sug' structs."
 
 (defun notelinks--legend-text ()
   "notelinks review — keys (active while point is on a suggestion):
-  a accept    r reject    n next    p previous    q quit
-elsewhere: C-c C-n next   C-c C-p prev   C-c C-q quit")
+  a accept   r reject   n next   p previous   j jump to target   q quit
+elsewhere: C-c C-n next   C-c C-p prev   C-c C-j jump   C-c C-q quit")
 
 (defun notelinks--show-legend ()
   (let ((buf (get-buffer-create "*notelinks-keys*")))
@@ -509,6 +532,7 @@ elsewhere: C-c C-n next   C-c C-p prev   C-c C-q quit")
     (define-key m "r" #'notelinks-reject)
     (define-key m "n" #'notelinks-next)
     (define-key m "p" #'notelinks-prev)
+    (define-key m "j" #'notelinks-jump-to-target)
     (define-key m "q" #'notelinks-quit)
     m)
   "Keymap active while point is inside a suggestion overlay.")
@@ -517,6 +541,7 @@ elsewhere: C-c C-n next   C-c C-p prev   C-c C-q quit")
   (let ((m (make-sparse-keymap)))
     (define-key m (kbd "C-c C-n") #'notelinks-next)
     (define-key m (kbd "C-c C-p") #'notelinks-prev)
+    (define-key m (kbd "C-c C-j") #'notelinks-jump-to-target)
     (define-key m (kbd "C-c C-q") #'notelinks-quit)
     m)
   "Keymap active buffer-wide during a notelinks review session.")
