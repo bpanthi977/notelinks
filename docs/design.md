@@ -70,7 +70,7 @@ src/notelinks/
     build.py   incremental refresh (mtime-gated, hash-confirmed)
   pipeline/
     retrieve.py  stateless: candidate generation + selection
-    judge.py     stateless: group-by-source-chunk judge calls
+    judge.py     stateless: group-by-target-file judge calls
 tests/         sample .org fixtures + unit/e2e tests
 ```
 
@@ -236,12 +236,15 @@ file isn't re-hashed on future runs.
 - **Structured output** via JSON-schema `response_format`, validated by
   pydantic. The judge may **reject** (return zero suggestions) — essential for
   precision.
-- **Batching: one call per source chunk**, presenting that chunk's up-to-N
-  candidate targets together (so it can choose among competing targets and avoid
-  over-linking one passage).
+- **Batching: one call per target file**, presenting all of that target note's
+  matched passages together. The judge decides, per passage, whether and **where
+  in the current note** each link attaches — so per-(target note + heading) dedup
+  is native and the note-vs-heading (`target_is_note`) call is made with full
+  sight of the target note's hits. (Originally one call per *source chunk*; see
+  `docs/decisions/t12-judge.md` for the switch.)
 - **Context per call:**
-  - *Source side:* the **full current note**, with the source chunk marked.
-    Because this prefix repeats across calls, it is sent as a **cached prefix**
+  - *Source side:* the **full current note**. It is constant across all
+    per-target-file calls for this note, so it is sent as a **cached prefix**
     (Anthropic prompt caching via OpenRouter `cache_control`) to control cost.
   - *Target side (per candidate):* target chunk + breadcrumb + note title + up
     to **1 adjacent chunk** of context, only if it exists **without crossing a
@@ -250,7 +253,10 @@ file isn't re-hashed on future runs.
   judge may instead choose the whole **note** when the connection is note-wide.
 - **Anchor — judge returns verbatim text, engine computes offsets.** The judge
   returns either the exact substring to **wrap**, or **insert** prose (carrying
-  a `{{link}}` slot) plus the verbatim sentence it attaches to. The engine
+  a `{{link}}` slot) plus the verbatim sentence it attaches to — copied verbatim
+  from anywhere in the current note (target-file grouping means the judge, not
+  retrieval, picks the attachment point, so the anchor is resolved against the
+  whole buffer). The engine
   locates that text in the buffer and fills the `source_anchor` fields
   (`char_start`/`char_end`, `expect`, ~40-char `before`/`after`, `template`,
   `link_description`). If not found verbatim, fall back to the chunk span or
@@ -289,7 +295,7 @@ file isn't re-hashed on future runs.
 ## 12. Data models & config
 
 - **`models.py`** mirrors `json-format.md` exactly for output (`Envelope`,
-  `Source`, `Suggestion`, `SourceChunk`, `Target`, `Heading`, `SourceAnchor`)
+  `Source`, `Suggestion`, `Target`, `Heading`, `SourceAnchor`)
   plus internal models (`Note`, `OrgHeading`, `Chunk`, `Candidate`, judge
   in/out).
 - **`config.py`** (`pydantic-settings`, env-overridable) defaults:

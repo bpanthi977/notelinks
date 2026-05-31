@@ -8,11 +8,14 @@ Two layers, mirroring `retrieve.py`:
   span only** and produces the wire-level :class:`SourceAnchor` (offsets,
   ~40-char ``before``/``after``, ``template``, ``link_description``). Fully
   unit-testable with synthetic data.
-* :func:`judge_candidates` — the orchestration. It groups candidates by source
-  chunk (one judge call per source chunk), builds a cached-prefix message layout
-  (system + full current note) plus a per-call target suffix, calls
+* :func:`judge_candidates` — the orchestration. It groups candidates by TARGET
+  FILE (one judge call per target note), builds a cached-prefix message layout
+  (system + full current note) plus a per-call suffix of that target note's
+  candidate passages, calls
   :func:`notelinks.providers.llm.complete_structured`, and assembles
-  :class:`Suggestion`s from the validated :class:`JudgeResponse`.
+  :class:`Suggestion`s from the validated :class:`JudgeResponse`. The judge
+  decides, for each candidate passage, whether and WHERE in the current note the
+  link attaches — so the anchor is resolved against the whole buffer.
 
 This module does NOT rank / dedup / cap / enforce invariants — that is the
 engine's job (T13, design §10). It returns the raw `list[Suggestion]`.
@@ -31,7 +34,6 @@ from notelinks.models import (
     JudgeResponse,
     RawJudgeSuggestion,
     SourceAnchor,
-    SourceChunk,
     Suggestion,
     Target,
     TargetHeading,
@@ -59,16 +61,21 @@ _TARGET_EXCERPT_MAX = 600
 
 
 def resolve_anchor(
-    anchor: JudgeAnchor, source_chunk: Chunk, buffer: str
+    anchor: JudgeAnchor, source_chunk: Chunk | None, buffer: str
 ) -> SourceAnchor | None:
-    """Locate ``anchor.expect`` in the source chunk's span → a `SourceAnchor`.
+    """Locate ``anchor.expect`` in the buffer → a `SourceAnchor`.
 
-    The search is **chunk-scoped**: ``expect`` is matched only within
-    ``buffer[source_chunk.char_start : source_chunk.char_end]`` (design §9 /
-    `docs/decisions/t4-models.md` deferred-ambiguity note). This removes all
-    cross-buffer collisions; the only residual ambiguity is the same string
-    appearing twice inside one chunk, in which case we pick the **first**
-    occurrence (documented; the deferred-ambiguity case).
+    Search scope depends on ``source_chunk``:
+
+    * ``source_chunk is None`` (the target-file grouping path) → search the
+      **whole buffer**. With one call per target note, the judge anchors anywhere
+      in the current note, so there is no single source chunk to scope to. The
+      residual ambiguity is the same ``expect`` string appearing more than once
+      in the note, in which case we pick the **first** occurrence.
+    * ``source_chunk`` given → **chunk-scoped**: ``expect`` is matched only within
+      ``buffer[source_chunk.char_start : source_chunk.char_end]`` (the original
+      behaviour, retained for the pure unit tests / a possible chunk-scoped
+      fallback). First occurrence within the span wins.
 
     Returns ``None`` if ``expect`` is not found in the chunk span — the caller
     then drops the suggestion or falls back to a whole-chunk wrap.
@@ -87,11 +94,15 @@ def resolve_anchor(
     ``before``/``after`` are ~40 chars of buffer flanking the region, computed
     here from the buffer (never produced by the LLM).
     """
-    span_start = source_chunk.char_start
-    span_end = source_chunk.char_end
+    if source_chunk is None:
+        span_start = 0
+        span_end = len(buffer)
+    else:
+        span_start = source_chunk.char_start
+        span_end = source_chunk.char_end
     chunk_span = buffer[span_start:span_end]
 
-    # First occurrence within the chunk span (deferred-ambiguity: first wins).
+    # First occurrence within the search span (deferred-ambiguity: first wins).
     local = chunk_span.find(anchor.expect)
     if local == -1:
         return None
@@ -138,34 +149,35 @@ contradiction, an instance of a general idea, a generalization of a specific \
 one, or an elaboration — EVEN WHEN THE TWO PASSAGES SHARE NO VOCABULARY. The \
 unit of connection is a passage, not a whole note.
 
-You are given the FULL current note for context, then ONE source chunk from it \
-(marked with its character range and heading), then a set of candidate target \
-passages from other notes. Decide which candidates are GENUINE, worth-linking \
-connections to the marked source chunk, and REJECT the rest. Precision matters \
-far more than recall: it is correct and expected to return an EMPTY list when \
-nothing genuinely resonates. Do not link mere topical overlap or shared keywords.
+You are given the FULL current note the user is writing, then a set of candidate \
+passages from ONE OTHER note in their corpus. For EACH candidate passage, decide \
+whether it is a GENUINE, worth-linking resonance with some passage in the current \
+note and, if so, WHERE in the current note the link should attach; REJECT the \
+rest. Precision matters far more than recall: it is correct and expected to \
+return an EMPTY list when nothing genuinely resonates. Do not link mere topical \
+overlap or shared keywords.
 
 For each candidate you ACCEPT, return one suggestion with:
 * candidate_id — the number of the accepted candidate (as labelled, e.g. 1).
 * type — classify the connection, choosing from EXACTLY this enum:
-    - "elaborates"            : target develops / adds detail to the source idea.
+    - "elaborates"            : target develops / adds detail to the current note's idea.
     - "analogous-mechanism"   : different domains, same underlying mechanism.
-    - "contradicts"           : target tension with / opposes the source claim.
-    - "instance-of"           : source is a concrete instance of the target's general idea.
-    - "generalizes"           : target is a general idea the source instantiates.
-    - "mention"               : source explicitly names the concept the target note is about.
+    - "contradicts"           : target is in tension with / opposes the current note's claim.
+    - "instance-of"           : the current note is a concrete instance of the target idea.
+    - "generalizes"           : target is a general idea the current note instantiates.
+    - "mention"               : the current note explicitly names the concept the target is about.
 * confidence — integer 1-5 (5 = certain, strong resonance worth surfacing).
 * why — one tight sentence naming the shared idea (what resonates), not a summary.
 * target_is_note — true to link the WHOLE target note (connection is note-wide),
-    false to link the target chunk's owning HEADING (the default; prefer this).
-* anchor — WHERE in the SOURCE chunk the link attaches. Copy text VERBATIM from
-    the SOURCE chunk text (never paraphrase, never use target text):
+    false to link the target passage's owning HEADING (the default; prefer this).
+* anchor — WHERE in the CURRENT NOTE the link attaches. Copy text VERBATIM from
+    the CURRENT NOTE (never paraphrase, never use target text):
     - To turn an existing phrase into a link: mode="wrap", expect=<the exact
-      phrase from the source chunk to wrap>. Keep it as short as conveys the idea.
+      phrase from the current note to wrap>. Keep it as short as conveys the idea.
     - To add a new sentence carrying the link: mode="insert", expect=<the exact
-      verbatim sentence in the source chunk to insert AFTER>, insert_text=<your
+      verbatim sentence in the current note to insert AFTER>, insert_text=<your
       authored prose containing the literal token {{link}} exactly once>.
-    The expect text MUST appear verbatim in the source chunk. Do not emit
+    The expect text MUST appear verbatim in the current note. Do not emit
     before/after offsets — the engine computes those.
 
 Return ONLY the structured object. An empty suggestions list is a valid, often
@@ -214,22 +226,21 @@ def _fetch_neighbour(store: Store, target: Chunk) -> Chunk | None:
 
 
 def _build_messages(
-    note: Note, source_chunk: Chunk, candidates: list[Candidate], store: Store
+    note: Note, target_title: str, candidates: list[Candidate], store: Store
 ) -> list[dict]:
-    """Cached-prefix (system + full note) + per-call source/target suffix.
+    """Cached-prefix (system + full current note) + per-target-file suffix.
 
-    The prefix repeats across every per-source-chunk call for this note, so the
-    full-note part is wrapped via :func:`llm.cached_text` (Anthropic ephemeral
-    cache breakpoint) to keep cost bounded. The suffix (the marked source chunk
-    + its candidate targets) is the cache-miss tail.
+    Every candidate here is from ONE target note. The full-current-note prefix is
+    constant across all per-target-file calls for this note, so it is wrapped via
+    :func:`llm.cached_text` (Anthropic ephemeral cache breakpoint) to keep cost
+    bounded. The suffix (this target note's candidate passages) is the
+    cache-miss tail.
     """
-    source_heading = source_chunk.heading_text or "(note preamble)"
     suffix_parts = [
-        "SOURCE CHUNK (from the current note above) — judge connections TO this:",
-        f"heading: {source_heading}",
-        f"char range: [{source_chunk.char_start}, {source_chunk.char_end})",
-        "source chunk text:",
-        source_chunk.text,
+        f"TARGET NOTE: {target_title}",
+        "Below are candidate passages from this one other note. For each, decide "
+        "whether it genuinely resonates with some passage in the CURRENT NOTE "
+        "above and, if so, WHERE in the current note the link should attach.",
         "",
         "CANDIDATE TARGET PASSAGES:",
     ]
@@ -243,10 +254,7 @@ def _build_messages(
         {
             "role": "user",
             "content": [
-                llm.cached_text(
-                    "FULL CURRENT NOTE:\n\n"
-                    + note.text
-                ),
+                llm.cached_text("FULL CURRENT NOTE:\n\n" + note.text),
                 {"type": "text", "text": suffix},
             ],
         },
@@ -283,23 +291,30 @@ def judge_candidates(
     client: OpenAI | None = None,
     max_workers: int = 8,
 ) -> list[Suggestion]:
-    """Judge candidates into `Suggestion`s, one LLM call per source chunk.
+    """Judge candidates into `Suggestion`s, one LLM call per TARGET FILE.
 
-    Candidates are grouped by source chunk (design §9: present a chunk's
-    competing targets together so the judge can choose among them and avoid
-    over-linking one passage). For each group a cached-prefix message (system +
-    full current note) plus a per-call target suffix is sent to
-    :func:`llm.complete_structured`, validated as a :class:`JudgeResponse`. The
-    judge MAY reject everything (empty list).
+    Candidates are grouped by target note (``target_chunk.note_uuid``): one judge
+    call per target note presents all of that note's matched passages together,
+    so the judge can choose note-vs-heading granularity and avoid over-linking the
+    same target note from several spots. For each group a cached-prefix message
+    (system + full current note) plus a per-call suffix of that target note's
+    candidate passages is sent to :func:`llm.complete_structured`, validated as a
+    :class:`JudgeResponse`. The judge MAY reject everything (empty list).
 
-    **Parallelism.** The per-source-chunk LLM calls are I/O-bound and the OpenAI
+    **Anchoring.** Because grouping is by target, the judge decides WHERE in the
+    current note each accepted link attaches; the anchor is resolved against the
+    whole buffer (``resolve_anchor(..., None, note.text)``). The output carries
+    only the resolved ``source_anchor`` (offsets + verbatim text) — there is no
+    separate ``source_chunk`` display field.
+
+    **Parallelism.** The per-target-file LLM calls are I/O-bound and the OpenAI
     SDK client is sync and thread-safe, so they run concurrently on a
     :class:`~concurrent.futures.ThreadPoolExecutor` (``max_workers``). The work
     splits cleanly: only the message build + LLM call run in threads; **all**
     assembly (anchor resolution, `Suggestion` construction, id assignment) runs
     sequentially afterwards in the original group order. This keeps the output
     deterministic: the returned list and the ``s01``/``s02``/… ids depend only on
-    first-seen group order, never on which LLM call finishes first.
+    first-seen target-file order, never on which LLM call finishes first.
 
     **Failure isolation.** An exception in one group's LLM call is logged and that
     group is skipped (it contributes no suggestions); the other groups still
@@ -307,49 +322,46 @@ def judge_candidates(
 
     Each accepted :class:`RawJudgeSuggestion` is anchored via
     :func:`resolve_anchor`. **Fallback choice:** if ``expect`` is not found
-    verbatim in the source chunk span, we DROP that suggestion (rather than a
-    whole-chunk wrap). Rationale: a non-matching ``expect`` means the judge
-    paraphrased or pointed outside the chunk, so the rationale/anchor pairing is
-    untrustworthy — dropping favours precision, consistent with the judge's
-    reject-by-default stance. (The whole-chunk-wrap fallback remains available;
-    see the decision doc.)
+    verbatim in the current note, we DROP that suggestion. Rationale: a
+    non-matching ``expect`` means the judge paraphrased or invented text, so the
+    rationale/anchor pairing is untrustworthy — dropping favours precision,
+    consistent with the judge's reject-by-default stance.
 
     Returns the assembled `list[Suggestion]` with stable ``s01``, ``s02``, … ids.
     Ranking / dedup / top_n / invariants are the engine's job (T13), NOT here.
     """
-    # Group candidates by source chunk, preserving first-seen order.
+    # Group candidates by TARGET FILE (note uuid), preserving first-seen order.
     groups: dict[str, list[Candidate]] = {}
-    source_by_id: dict[str, Chunk] = {}
+    title_by_uuid: dict[str, str] = {}
     for candidate in candidates:
-        sid = candidate.source_chunk.chunk_id
-        source_by_id.setdefault(sid, candidate.source_chunk)
-        groups.setdefault(sid, []).append(candidate)
+        tid = candidate.target_chunk.note_uuid
+        title_by_uuid.setdefault(tid, candidate.target_chunk.note_title)
+        groups.setdefault(tid, []).append(candidate)
 
     # Stable, original group order — assembly and id assignment key off this.
-    ordered_sids = list(groups)
+    ordered_tids = list(groups)
 
     logger.info(
-        "judge: %d candidates grouped into %d source-chunk calls",
+        "judge: %d candidates grouped into %d target-file calls",
         len(candidates),
-        len(ordered_sids),
+        len(ordered_tids),
     )
 
-    def _call(sid: str) -> JudgeResponse:
-        source_chunk = source_by_id[sid]
+    def _call(tid: str) -> JudgeResponse:
         # A per-group span (no-op unless tracing): created INSIDE the worker
         # thread under the propagated context, so the group's OpenAI auto-span
         # nests under the suggest root trace rather than splitting off.
-        with observability.judge_span(sid):
-            messages = _build_messages(note, source_chunk, groups[sid], store)
+        with observability.judge_span(tid):
+            messages = _build_messages(note, title_by_uuid[tid], groups[tid], store)
             started = time.perf_counter()
             response = llm.complete_structured(
                 messages, settings, JudgeResponse, client=client
             )
             assert isinstance(response, JudgeResponse)  # narrow for type-checkers
             logger.debug(
-                "judge: group %s (%d targets) -> %d suggestions in %.2fs",
-                sid,
-                len(groups[sid]),
+                "judge: target %s (%d passages) -> %d suggestions in %.2fs",
+                tid,
+                len(groups[tid]),
                 len(response.suggestions),
                 time.perf_counter() - started,
             )
@@ -363,33 +375,32 @@ def judge_candidates(
     # Parallel I/O: one LLM call per source chunk. Results are collected keyed by
     # sid so the order in which calls *finish* never affects the output.
     responses: dict[str, JudgeResponse] = {}
-    if ordered_sids:
+    if ordered_tids:
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            future_to_sid = {
+            future_to_tid = {
                 executor.submit(
-                    observability.context_propagating_wrapper(_call, parent_ctx), sid
-                ): sid
-                for sid in ordered_sids
+                    observability.context_propagating_wrapper(_call, parent_ctx), tid
+                ): tid
+                for tid in ordered_tids
             }
-            for future, sid in future_to_sid.items():
+            for future, tid in future_to_tid.items():
                 try:
-                    responses[sid] = future.result()
+                    responses[tid] = future.result()
                 except Exception:
                     # Failure isolation: log and skip this group; others survive.
                     logger.exception(
-                        "judge LLM call failed for source chunk %s; skipping group",
-                        sid,
+                        "judge LLM call failed for target file %s; skipping group",
+                        tid,
                     )
 
     # Sequential, pure assembly in the original group order (deterministic ids).
     suggestions: list[Suggestion] = []
     counter = 0
-    for sid in ordered_sids:
-        response = responses.get(sid)
+    for tid in ordered_tids:
+        response = responses.get(tid)
         if response is None:
             continue  # the group's LLM call failed and was skipped above.
-        group = groups[sid]
-        source_chunk = source_by_id[sid]
+        group = groups[tid]
         # Map the judge's candidate number (1..N, as labelled) back to a Candidate.
         target_by_label = {i: c for i, c in enumerate(group, start=1)}
 
@@ -398,7 +409,9 @@ def judge_candidates(
             if candidate is None:
                 # Judge referenced an id we did not offer — ignore defensively.
                 continue
-            anchor = resolve_anchor(raw.anchor, source_chunk, note.text)
+            # Target-file grouping: the judge chose where in the current note the
+            # link attaches, so anchor against the whole buffer (source_chunk=None).
+            anchor = resolve_anchor(raw.anchor, None, note.text)
             if anchor is None:
                 # Fallback choice: drop (see docstring). Favours precision.
                 continue
@@ -418,12 +431,6 @@ def judge_candidates(
                     type=raw.type,
                     confidence=raw.confidence,
                     why=raw.why,
-                    source_chunk=SourceChunk(
-                        text=source_chunk.text,
-                        heading=source_chunk.heading_text,
-                        char_start=source_chunk.char_start,
-                        char_end=source_chunk.char_end,
-                    ),
                     target_excerpt=excerpt,
                     target=target,
                     source_anchor=anchor,

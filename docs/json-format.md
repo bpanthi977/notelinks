@@ -87,12 +87,7 @@ keeps async drift small; markers absorb the rest.
   "confidence": 4,                           // 1–5
   "why": "Both cast error-correction as the driver of updating.",
 
-  // ---- DISPLAY: what resonated (the user judges on these) ----
-  "source_chunk": {
-    "text": "Prediction error is the signal that...",
-    "heading": "Error as signal",            // heading in the CURRENT note, or null
-    "char_start": 1180, "char_end": 1402
-  },
+  // ---- DISPLAY: what the target says (the user judges on this + why) ----
   "target_excerpt": "The immune system tunes itself by...",
 
   // ---- NAVIGATION + link assembly (components only) ----

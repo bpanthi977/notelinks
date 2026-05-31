@@ -67,7 +67,7 @@ When nil the engine falls back to its own NOTELINKS_CORPUS_DIR."
 ;;;; State (buffer-local in the source note buffer)
 
 (cl-defstruct notelinks-sug
-  id type confidence why source-chunk target-excerpt target anchor
+  id type confidence why target-excerpt target anchor
   link-desc template mode overlay)
 
 (defvar-local notelinks--suggestions nil
@@ -358,7 +358,6 @@ where KEPT is plists and DISCARDED is `notelinks-sug' structs."
      :type (alist-get 'type raw)
      :confidence (or (alist-get 'confidence raw) 0)
      :why (alist-get 'why raw)
-     :source-chunk (alist-get 'source_chunk raw)
      :target-excerpt (alist-get 'target_excerpt raw)
      :target (alist-get 'target raw)
      :anchor anchor

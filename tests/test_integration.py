@@ -35,7 +35,6 @@ from notelinks.models import (
     JudgeResponse,
     RawJudgeSuggestion,
     SourceAnchor,
-    SourceChunk,
     Suggestion,
     Target,
     TargetHeading,
@@ -281,9 +280,14 @@ def test_suggest_end_to_end_happy_path(env, monkeypatch):
     corpus_dir, settings, spy = env
 
     def fake_complete_structured(messages, settings_, response_model, *, client=None):
-        """Accept the immune target, anchoring on a verbatim span from the buffer."""
+        """Accept the immune target, anchoring on a verbatim span from the buffer.
+
+        Grouping is now one call per target file, so each call's suffix lists only
+        ONE note's passages. Accept the immune candidate when this call is for the
+        immune note; otherwise REJECT (empty) — the judge's reject-by-default
+        stance — so the test's "immune is the surfaced neighbour" intent holds.
+        """
         suffix = messages[-1]["content"][-1]["text"]
-        # Prefer the immune target id; fall back to the first offered id otherwise.
         chosen = None
         current = None
         for line in suffix.splitlines():
@@ -293,7 +297,7 @@ def test_suggest_end_to_end_happy_path(env, monkeypatch):
                 chosen = current
                 break
         if chosen is None:
-            chosen = 1
+            return JudgeResponse(suggestions=[])  # not the immune note → reject
         return JudgeResponse(
             suggestions=[
                 RawJudgeSuggestion(
@@ -389,9 +393,6 @@ def _suggestion(
         type="analogous-mechanism",
         confidence=confidence,
         why="why",
-        source_chunk=SourceChunk(
-            text=expect, heading="Error as signal", char_start=start, char_end=end
-        ),
         target_excerpt="excerpt",
         target=Target(file=file, title=title, file_id=file_id, heading=heading),
         source_anchor=SourceAnchor(
@@ -580,7 +581,7 @@ def test_top_n_cap_is_respected(env, monkeypatch):
 # ``Engine.suggest`` runs with the two provider boundaries monkeypatched. We then
 # assert the manual spans we create — the root ``notelinks.suggest``, the
 # ``retrieve_candidates`` RETRIEVER span (same thread), and EVERY
-# ``judge_source_chunk`` span (created INSIDE ThreadPoolExecutor worker threads) —
+# ``judge_target_file`` span (created INSIDE ThreadPoolExecutor worker threads) —
 # all share the root's ``trace_id``. The judge-group spans nesting under the root
 # is the proxy that proves contextvars-based otel context was propagated across
 # threads (the auto OpenAI spans need real calls, so they are out of scope here).
@@ -661,8 +662,8 @@ def test_suggest_emits_one_unified_trace(env, monkeypatch):
     # The three manual span kinds are present.
     assert len(by_name.get("notelinks.suggest", [])) == 1, "exactly one root span"
     assert by_name.get("retrieve_candidates"), "retrieval span recorded"
-    judge_spans = by_name.get("judge_source_chunk", [])
-    assert judge_spans, "at least one per-source-chunk judge span (in a worker thread)"
+    judge_spans = by_name.get("judge_target_file", [])
+    assert judge_spans, "at least one per-target-file judge span (in a worker thread)"
 
     root = by_name["notelinks.suggest"][0]
     root_trace_id = root.context.trace_id

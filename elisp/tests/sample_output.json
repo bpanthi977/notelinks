@@ -13,12 +13,6 @@
       "type": "analogous-mechanism",
       "confidence": 5,
       "why": "The note's epistemic = H(model-averaged prediction) - E_theta[H(per-model prediction)] is exactly the mutual-information identity I(X;Y) = H(X) - H(X|Y) defined in the target. Same decomposition, different notation.",
-      "source_chunk": {
-        "text": "The first time is entropy of the mixture (how uncertain the overall prediction is when averaged over all models), and the second term is average entropy of the individual models (how uncertain is each model on its own)",
-        "heading": null,
-        "char_start": 2970,
-        "char_end": 3188
-      },
       "target_excerpt": "I(X;Y) = H(X) + H(Y) - H(X,Y);  I(X;Y) = H(X) - H(X|Y). Mutual information is also not dependent on the units and is non zero.",
       "target": {
         "file": "notes/entropy.org",
@@ -45,12 +39,6 @@
       "type": "analogous-mechanism",
       "confidence": 4,
       "why": "Laplace approximation picks a Gaussian as the local model of the posterior; the target shows the Gaussian is the maximum-entropy distribution for a given mean and variance - the least-committal choice, which is why it is the natural approximating family.",
-      "source_chunk": {
-        "text": "Laplace approximation: Approximate the gaussain centered around a point estimate model theta*, with a hessian capturing local curvature",
-        "heading": null,
-        "char_start": 1761,
-        "char_end": 1980
-      },
       "target_excerpt": "the gaussian distribution maximizes the entropy ... H[x] = 1/2 ( 1 + ln 2 pi sigma^2 ). (ROAM alias: Gaussian maximizes entropy for a given mean and variance.)",
       "target": {
         "file": "notes/entropy.org",
@@ -77,12 +65,6 @@
       "type": "mention",
       "confidence": 3,
       "why": "The phrase names the entropy of a mixture distribution; links the bare term to the canonical Entropy note for definition.",
-      "source_chunk": {
-        "text": "The first time is entropy of the mixture (how uncertain the overall prediction is when averaged over all models)",
-        "heading": null,
-        "char_start": 2970,
-        "char_end": 3081
-      },
       "target_excerpt": "Average amount of information that you get from a message. Entropy of a discrete random variable X ... H(X) = - sum_i p_i log p_i.",
       "target": {
         "file": "notes/entropy.org",
@@ -105,12 +87,6 @@
       "type": "analogous-mechanism",
       "confidence": 3,
       "why": "Averaging the prediction over the posterior ensemble of models mirrors a macrostate as an ensemble over microstates - uncertainty as an average over a population of configurations.",
-      "source_chunk": {
-        "text": "the overall prediction is when averaged over all models",
-        "heading": null,
-        "char_start": 3026,
-        "char_end": 3081
-      },
       "target_excerpt": "the arrangement of objects in the bins is called a microstate and overall distribution n_i/N is called macrostate ... S = k ln W, W is the number of possible microstates in a macrostate.",
       "target": {
         "file": "notes/entropy.org",

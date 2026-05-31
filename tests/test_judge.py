@@ -238,11 +238,6 @@ def test_judge_candidates_assembles_suggestion(monkeypatch) -> None:
     assert sug.target.heading.id == "HEAD-ID"
     assert sug.target.heading.level == 2
 
-    # Source chunk display fields.
-    assert sug.source_chunk.heading == "Error as signal"
-    assert sug.source_chunk.char_start == 0
-    assert sug.source_chunk.char_end == len(SOURCE_BUFFER)
-
     # SourceAnchor resolved against the buffer.
     start = SOURCE_BUFFER.index("driving signal")
     assert sug.source_anchor.char_start == start
@@ -359,21 +354,24 @@ def test_judge_candidates_drops_unanchorable_suggestion(monkeypatch) -> None:
     assert out == []  # dropped because expect was not found verbatim
 
 
-def test_judge_candidates_groups_by_source_chunk(monkeypatch) -> None:
-    # Two candidates sharing one source chunk + one from a second source chunk
-    # => two judge calls (one per source chunk).
-    c1 = _make_candidate()
+def test_judge_candidates_groups_by_target_file(monkeypatch) -> None:
+    # Two candidates hitting the SAME target note (different chunks of it) + one
+    # candidate hitting a SECOND target note => exactly two judge calls (one per
+    # target file), regardless of which source chunk each came from.
+    c1 = _make_candidate()  # target note TGT-UUID
+    # A second chunk of the SAME target note TGT-UUID (different ordinal).
     c2 = _make_candidate()
-    # second target on the same source chunk
     c2.target_chunk = make_chunk(
-        "TGT2-UUID",
-        0,
-        text="Another target.",
-        heading_text="Other",
-        heading_level=1,
-        note_path="notes/other.org",
-        note_title="Other Note",
+        "TGT-UUID",
+        7,
+        text="A second passage from the same target note.",
+        heading_text="Clonal selection",
+        heading_level=2,
+        heading_index=5,
+        note_path="notes/immune.org",
+        note_title="Immune Memory",
     )
+    # A candidate from a different source chunk hitting a SECOND target note.
     src2 = make_chunk(
         "SRC-UUID",
         9,
@@ -382,7 +380,16 @@ def test_judge_candidates_groups_by_source_chunk(monkeypatch) -> None:
         char_end=30,
         heading_index=2,
     )
-    c3 = Candidate(source_chunk=src2, target_chunk=c1.target_chunk, score=0.5)
+    other_target = make_chunk(
+        "TGT2-UUID",
+        0,
+        text="Another target.",
+        heading_text="Other",
+        heading_level=1,
+        note_path="notes/other.org",
+        note_title="Other Note",
+    )
+    c3 = Candidate(source_chunk=src2, target_chunk=other_target, score=0.5)
 
     store = FakeStore(None)
     calls: list = []
@@ -395,7 +402,7 @@ def test_judge_candidates_groups_by_source_chunk(monkeypatch) -> None:
 
     judge_candidates([c1, c2, c3], _make_note(), store, Settings())
 
-    # c1 and c2 share source SRC-UUID:0; c3 is SRC-UUID:9 => exactly 2 calls.
+    # c1 and c2 share target TGT-UUID; c3 is TGT2-UUID => exactly 2 calls.
     assert len(calls) == 2
 
 
@@ -419,7 +426,11 @@ def _multi_note() -> Note:
 
 
 def _multi_candidates() -> list[Candidate]:
-    """One candidate per distinct source chunk (3 groups), each anchorable."""
+    """One candidate per distinct target file (3 groups), each anchorable.
+
+    Each candidate also has its own source chunk whose phrase is verbatim-findable
+    in the current note, so the whole-buffer anchor resolves for every group.
+    """
     sentences = [
         "Alpha drives the alpha signal forward.",
         "Beta tunes the beta loop slowly.",
@@ -457,10 +468,10 @@ def _multi_candidates() -> list[Candidate]:
     return candidates
 
 
-def _canned_for(sid: str, candidates: list[Candidate]) -> JudgeResponse:
-    """A per-source canned response wrapping that group's distinct phrase."""
-    # sid is "SRC-UUID:<ordinal>"; map back to the matching candidate/phrase.
-    cand = next(c for c in candidates if c.source_chunk.chunk_id == sid)
+def _canned_for(tid: str, candidates: list[Candidate]) -> JudgeResponse:
+    """A per-target-file canned response wrapping that group's distinct phrase."""
+    # tid is a target note uuid; map back to the matching candidate/phrase.
+    cand = next(c for c in candidates if c.target_chunk.note_uuid == tid)
     idx = candidates.index(cand)
     return JudgeResponse(
         suggestions=[
@@ -479,27 +490,27 @@ def _canned_for(sid: str, candidates: list[Candidate]) -> JudgeResponse:
 def _sequential_expectation(
     candidates: list[Candidate], store, monkeypatch
 ) -> list:
-    """Run the judge with a plain (no-sleep) per-source mock = the reference."""
+    """Run the judge with a plain (no-sleep) per-target mock = the reference."""
 
     def plain(messages, settings, response_model, *, client=None):
-        sid = _sid_from_messages(messages, candidates)
-        return _canned_for(sid, candidates)
+        tid = _tid_from_messages(messages, candidates)
+        return _canned_for(tid, candidates)
 
     monkeypatch.setattr(judge_mod.llm, "complete_structured", plain)
     return judge_candidates(candidates, _multi_note(), store, Settings(), max_workers=4)
 
 
-def _sid_from_messages(messages, candidates) -> str:
-    """Recover which source chunk a built message set belongs to.
+def _tid_from_messages(messages, candidates) -> str:
+    """Recover which target file a built message set belongs to.
 
-    The per-call suffix embeds the source chunk text; match it back to a sid so
-    the mock routes the correct canned response to the correct group.
+    The per-call suffix embeds the target passage text; match it back to a target
+    note uuid so the mock routes the correct canned response to the correct group.
     """
     suffix = messages[1]["content"][1]["text"]
     for c in candidates:
-        if c.source_chunk.text in suffix:
-            return c.source_chunk.chunk_id
-    raise AssertionError("could not route message to a source chunk")
+        if c.target_chunk.text in suffix:
+            return c.target_chunk.note_uuid
+    raise AssertionError("could not route message to a target file")
 
 
 def test_judge_parallel_stable_order_despite_out_of_order_completion(
@@ -516,15 +527,15 @@ def test_judge_parallel_stable_order_despite_out_of_order_completion(
     n_groups = len(candidates)
 
     def out_of_order(messages, settings, response_model, *, client=None):
-        sid = _sid_from_messages(messages, candidates)
+        tid = _tid_from_messages(messages, candidates)
         idx = next(
             i
             for i, c in enumerate(candidates)
-            if c.source_chunk.chunk_id == sid
+            if c.target_chunk.note_uuid == tid
         )
         # Earlier groups sleep longer => completion order is reversed.
         time.sleep(0.02 * (n_groups - idx))
-        return _canned_for(sid, candidates)
+        return _canned_for(tid, candidates)
 
     monkeypatch.setattr(judge_mod.llm, "complete_structured", out_of_order)
 
@@ -553,26 +564,26 @@ def test_judge_parallel_calls_once_per_group(monkeypatch) -> None:
     def fake(messages, settings, response_model, *, client=None):
         with lock:
             count["n"] += 1
-        sid = _sid_from_messages(messages, candidates)
-        return _canned_for(sid, candidates)
+        tid = _tid_from_messages(messages, candidates)
+        return _canned_for(tid, candidates)
 
     monkeypatch.setattr(judge_mod.llm, "complete_structured", fake)
     judge_candidates(candidates, _multi_note(), store, Settings(), max_workers=4)
 
-    # One call per distinct source chunk (3 groups).
+    # One call per distinct target file (3 groups).
     assert count["n"] == 3
 
 
 def test_judge_parallel_failure_isolation(monkeypatch) -> None:
     candidates = _multi_candidates()
     store = FakeStore(None)
-    failing_sid = candidates[1].source_chunk.chunk_id  # middle group fails
+    failing_tid = candidates[1].target_chunk.note_uuid  # middle group fails
 
     def fake(messages, settings, response_model, *, client=None):
-        sid = _sid_from_messages(messages, candidates)
-        if sid == failing_sid:
+        tid = _tid_from_messages(messages, candidates)
+        if tid == failing_tid:
             raise RuntimeError("boom in group 1")
-        return _canned_for(sid, candidates)
+        return _canned_for(tid, candidates)
 
     monkeypatch.setattr(judge_mod.llm, "complete_structured", fake)
 
@@ -597,16 +608,16 @@ def test_judge_parallel_thread_safe_per_group_routing(monkeypatch) -> None:
     barrier = threading.Barrier(len(candidates))
 
     def fake(messages, settings, response_model, *, client=None):
-        sid = _sid_from_messages(messages, candidates)
+        tid = _tid_from_messages(messages, candidates)
         suffix = messages[1]["content"][1]["text"]
-        cand = next(c for c in candidates if c.source_chunk.chunk_id == sid)
+        cand = next(c for c in candidates if c.target_chunk.note_uuid == tid)
         # Force genuine concurrency: every call waits until all are in-flight.
         barrier.wait(timeout=5)
         with lock:
-            seen.append((sid, suffix))
-        # The suffix carried into this call must be this group's own source text.
-        assert cand.source_chunk.text in suffix
-        return _canned_for(sid, candidates)
+            seen.append((tid, suffix))
+        # The suffix carried into this call must be this group's own target text.
+        assert cand.target_chunk.text in suffix
+        return _canned_for(tid, candidates)
 
     monkeypatch.setattr(judge_mod.llm, "complete_structured", fake)
 
@@ -615,7 +626,7 @@ def test_judge_parallel_thread_safe_per_group_routing(monkeypatch) -> None:
     )
 
     # Every group routed exactly once, with its own input (no data races).
-    assert sorted(sid for sid, _ in seen) == sorted(
-        c.source_chunk.chunk_id for c in candidates
+    assert sorted(tid for tid, _ in seen) == sorted(
+        c.target_chunk.note_uuid for c in candidates
     )
     assert [s.id for s in out] == ["s01", "s02", "s03"]

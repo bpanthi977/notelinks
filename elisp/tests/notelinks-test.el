@@ -143,7 +143,6 @@ ENV is an already-built envelope alist.  `content' is bound for BODY."
   "Build a raw suggestion alist for a wrap-span (or insert when EXPECT is empty)."
   `((id . ,id) (type . "analogous-mechanism") (confidence . ,conf)
     (why . ,(concat "why-" id))
-    (source_chunk . ((text . "") (heading) (char_start . 0) (char_end . 0)))
     (target_excerpt . "excerpt")
     (target . ((file . "other.org") (title . "Other") (file_id . "FID") (heading)))
     (source_anchor . ((char_start . 0)

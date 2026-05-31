@@ -285,12 +285,12 @@ def context_propagating_wrapper[T](
 
 
 @contextlib.contextmanager
-def judge_span(source_chunk_id: str) -> Iterator[Any]:
-    """A span per judge group (one per source chunk) — a no-op when tracing off.
+def judge_span(target_file_id: str) -> Iterator[Any]:
+    """A span per judge group (one per target file) — a no-op when tracing off.
 
     Created **inside** the worker thread under the context propagated by
     :func:`context_propagating_wrapper`, so it nests under the root span. This
-    both enriches the trace (a named node per source-chunk judge group around
+    both enriches the trace (a named node per target-file judge group around
     its OpenAI auto-span) and makes thread-context propagation observable/testable
     (its ``trace_id`` must equal the root's).
 
@@ -300,8 +300,8 @@ def judge_span(source_chunk_id: str) -> Iterator[Any]:
         yield None
         return
 
-    with _TRACER.start_as_current_span("judge_source_chunk") as span:
-        span.set_attribute("notelinks.source_chunk_id", source_chunk_id)
+    with _TRACER.start_as_current_span("judge_target_file") as span:
+        span.set_attribute("notelinks.target_file_id", target_file_id)
         yield span
 
 

@@ -46,15 +46,6 @@ class Source(BaseModel):
     content_hash: str  # "sha256:..." of the buffer text at query time
 
 
-class SourceChunk(BaseModel):
-    """``suggestion.source_chunk`` — DISPLAY: what resonated in the current note."""
-
-    text: str
-    heading: str | None  # heading in the current note, or null
-    char_start: int
-    char_end: int
-
-
 class TargetHeading(BaseModel):
     """``suggestion.target.heading`` — heading link components, or null = file-level."""
 
@@ -91,7 +82,6 @@ class Suggestion(BaseModel):
     type: ConnectionType
     confidence: int = Field(ge=1, le=5)  # 1-5
     why: str
-    source_chunk: SourceChunk
     target_excerpt: str
     target: Target
     source_anchor: SourceAnchor

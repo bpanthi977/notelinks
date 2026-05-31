@@ -7,10 +7,23 @@ layers mirroring `retrieve.py`: a pure anchor-resolution core
 
 ## Grouping
 
-`judge_candidates` groups candidates **by source chunk** (`chunk_id`), one judge
-call per source chunk (design §9). Presenting a source chunk's competing targets
-together lets the judge choose among them and avoid over-linking one passage.
-First-seen order is preserved so output ids are stable within a run.
+> **Update (post-T12): grouping switched from source-chunk to TARGET FILE.**
+> `judge_candidates` now groups candidates **by target note**
+> (`target_chunk.note_uuid`), one judge call per target note, presenting *all*
+> of that note's matched passages together. The task is reframed as: given the
+> full current note and candidate passages from ONE other note, decide which
+> genuinely resonate and **where in the current note** each link attaches. This
+> makes the per-(target note + heading) dedup native and lets the judge make the
+> note-vs-heading (`target_is_note`) call with full sight of the target note's
+> hits. Consequence: the anchor is no longer chunk-scoped — see *Anchor
+> resolution* below. First-seen target-file order is preserved so output ids
+> stay stable within a run. The original per-source-chunk rationale (below) is
+> retained for history.
+
+`judge_candidates` originally grouped candidates **by source chunk** (`chunk_id`),
+one judge call per source chunk (design §9). Presenting a source chunk's competing
+targets together lets the judge choose among them and avoid over-linking one
+passage. First-seen order is preserved so output ids are stable within a run.
 
 ## Message layout (cached prefix + per-call suffix)
 
@@ -44,12 +57,18 @@ the prompt so the judge anchors against the source, not the neighbour.
 ## Anchor resolution + fallback
 
 `resolve_anchor(anchor, source_chunk, buffer) -> SourceAnchor | None` is the pure
-core:
+core. `source_chunk` is now **optional**:
 
-- Search for `anchor.expect` **only within**
-  `buffer[source_chunk.char_start : source_chunk.char_end]` (chunk-scoped, per
-  the t4-models deferred-ambiguity note). This eliminates cross-buffer
-  collisions.
+- **`source_chunk is None` (target-file grouping path, used by
+  `judge_candidates`)**: search for `anchor.expect` across the **whole buffer**
+  (the judge picked where in the current note the link attaches). First
+  whole-buffer occurrence wins. Trade-off: this reintroduces the possibility of a
+  duplicated `expect` string matching the wrong spot — accepted as the cost of
+  letting the judge anchor anywhere in the note.
+- **`source_chunk` given (chunk-scoped, original behaviour, retained for the pure
+  unit tests / a possible fallback)**: search **only within**
+  `buffer[source_chunk.char_start : source_chunk.char_end]`. This eliminates
+  cross-buffer collisions.
 - `mode="wrap"`: region = the matched `expect` span → `char_start`/`char_end` of
   that span in the buffer; `expect` = span text; `template="{{link}}"`;
   `link_description` = span text.
@@ -88,8 +107,11 @@ context-snippet/locator split in v1.
   or the chunk has no heading (preamble) → `None` (file-level target). `level`
   falls back to 1 if the chunk's `heading_level` is `None` but a heading text
   exists (defensive; shouldn't normally happen).
-- `source_chunk` = `SourceChunk(text, heading=source heading_text or None,
-  char_start, char_end)`.
+- `source_chunk` (DISPLAY: "what resonated") = the **retrieval-matched** source
+  chunk carried on the `Candidate` (`candidate.source_chunk`), rendered as
+  `SourceChunk(text, heading=source heading_text or None, char_start, char_end)`.
+  With target-file grouping this is the passage retrieval matched to the target,
+  which may differ from where the judge anchored the link.
 - `target_excerpt` = target chunk text, truncated to `_TARGET_EXCERPT_MAX`
   (600 chars).
 - `type`, `confidence`, `why` from the raw suggestion; `id` = `s01`, `s02`, …
