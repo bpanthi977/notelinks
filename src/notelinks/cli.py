@@ -24,6 +24,7 @@ from typing import Annotated
 
 import typer
 
+from notelinks import observability
 from notelinks.config import Settings
 from notelinks.engine import Engine
 
@@ -38,6 +39,38 @@ _CorpusOpt = Annotated[
 _RebuildOpt = Annotated[
     bool, typer.Option("--rebuild", help="Force a full reindex.")
 ]
+_VerboseOpt = Annotated[
+    bool,
+    typer.Option(
+        "--verbose", "-v", help="Timestamped DEBUG logging to stderr (stdout stays JSON)."
+    ),
+]
+_TraceOpt = Annotated[
+    bool,
+    typer.Option(
+        "--trace",
+        help="Export OpenTelemetry traces to a local Phoenix collector "
+        "(needs the 'trace' extra + a running `phoenix serve`).",
+    ),
+]
+
+
+def _enable_observability(verbose: bool, trace: bool) -> None:
+    """Set up logging (always) then tracing (only with --trace) — both to stderr.
+
+    Logging is configured first thing so even the trace-setup errors are logged.
+    When ``--trace`` is on we print a one-line hint to **stderr** (never stdout)
+    naming the collector endpoint + the command to view it locally.
+    """
+    observability.setup_logging(verbose)
+    if trace:
+        observability.setup_tracing()
+        endpoint = observability.tracing_endpoint()
+        typer.echo(
+            f"[notelinks] tracing -> {endpoint} "
+            f"(run a local Phoenix to view: `phoenix serve`, then open {endpoint})",
+            err=True,
+        )
 
 
 def _build_settings(corpus: Path | None) -> Settings:
@@ -53,8 +86,13 @@ def _build_settings(corpus: Path | None) -> Settings:
 
 
 @app.command()
-def suggest(corpus: _CorpusOpt = None) -> None:
+def suggest(
+    corpus: _CorpusOpt = None,
+    verbose: _VerboseOpt = False,
+    trace: _TraceOpt = False,
+) -> None:
     """Read the note buffer from stdin and print suggestion JSON to stdout."""
+    _enable_observability(verbose, trace)
     buffer_text = sys.stdin.read()
     settings = _build_settings(corpus)
     envelope = Engine(settings).suggest(buffer_text)
@@ -62,8 +100,14 @@ def suggest(corpus: _CorpusOpt = None) -> None:
 
 
 @app.command()
-def index(rebuild: _RebuildOpt = False, corpus: _CorpusOpt = None) -> None:
+def index(
+    rebuild: _RebuildOpt = False,
+    corpus: _CorpusOpt = None,
+    verbose: _VerboseOpt = False,
+    trace: _TraceOpt = False,
+) -> None:
     """Refresh (or rebuild) the corpus index; print the build stats."""
+    _enable_observability(verbose, trace)
     settings = _build_settings(corpus)
     stats = Engine(settings).refresh(rebuild=rebuild)
     typer.echo(json.dumps(stats, indent=2))

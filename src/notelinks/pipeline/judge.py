@@ -21,6 +21,7 @@ engine's job (T13, design §10). It returns the raw `list[Suggestion]`.
 from __future__ import annotations
 
 import logging
+import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING
 
@@ -327,13 +328,27 @@ def judge_candidates(
     # Stable, original group order — assembly and id assignment key off this.
     ordered_sids = list(groups)
 
+    logger.info(
+        "judge: %d candidates grouped into %d source-chunk calls",
+        len(candidates),
+        len(ordered_sids),
+    )
+
     def _call(sid: str) -> JudgeResponse:
         source_chunk = source_by_id[sid]
         messages = _build_messages(note, source_chunk, groups[sid], store)
+        started = time.perf_counter()
         response = llm.complete_structured(
             messages, settings, JudgeResponse, client=client
         )
         assert isinstance(response, JudgeResponse)  # narrow for type-checkers
+        logger.debug(
+            "judge: group %s (%d targets) -> %d suggestions in %.2fs",
+            sid,
+            len(groups[sid]),
+            len(response.suggestions),
+            time.perf_counter() - started,
+        )
         return response
 
     # Parallel I/O: one LLM call per source chunk. Results are collected keyed by

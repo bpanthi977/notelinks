@@ -19,8 +19,10 @@ it; the engine never builds-and-tears-down clients or the store per call
 from __future__ import annotations
 
 import hashlib
+import logging
 from datetime import UTC, datetime
 
+from notelinks import observability
 from notelinks.config import Settings
 from notelinks.index import build
 from notelinks.index.store import Store
@@ -31,6 +33,8 @@ from notelinks.pipeline.judge import judge_candidates
 from notelinks.pipeline.retrieve import retrieve_candidates
 from notelinks.providers import llm
 from notelinks.providers.embeddings import embed_texts
+
+logger = logging.getLogger(__name__)
 
 _ENVELOPE_VERSION = 1
 
@@ -68,9 +72,19 @@ class Engine:
         stats dict (``indexed`` / ``reindexed`` / ``skipped`` / ``deleted`` /
         ``chunks``).
         """
-        return build.refresh(
+        stats = build.refresh(
             self.store, self.settings, client=self.client, rebuild=rebuild
         )
+        logger.info(
+            "refresh: indexed=%d reindexed=%d skipped=%d deleted=%d chunks=%d (rebuild=%s)",
+            stats["indexed"],
+            stats["reindexed"],
+            stats["skipped"],
+            stats["deleted"],
+            stats["chunks"],
+            rebuild,
+        )
+        return stats
 
     def suggest(self, buffer_text: str) -> Envelope:
         """Run the full pipeline for one note buffer → an :class:`Envelope`.
@@ -105,29 +119,50 @@ class Engine:
         source_embeddings = embed_texts(
             [c.embed_text for c in source_chunks], self.settings, client=self.client
         )
+        logger.info(
+            "suggest: note=%s (%r) chunked into %d source chunks",
+            note.id,
+            note.title,
+            len(source_chunks),
+        )
 
         # 4. Already-linked targets are never re-suggested.
         exclude_target_uuids = [link.target_uuid for link in note.links]
 
-        candidates = retrieve_candidates(
-            self.store,
-            source_chunks,
-            source_embeddings,
-            settings=self.settings,
-            current_note_uuid=note.id,
-            exclude_target_uuids=exclude_target_uuids,
+        # Retrieval wrapped in a (no-op-unless-traced) RETRIEVER span so the
+        # vector-search step shows in the same Phoenix trace as the judge calls.
+        with observability.retrieval_span(note.title) as span:
+            candidates = retrieve_candidates(
+                self.store,
+                source_chunks,
+                source_embeddings,
+                settings=self.settings,
+                current_note_uuid=note.id,
+                exclude_target_uuids=exclude_target_uuids,
+            )
+            span.record_candidates(candidates)
+        logger.info(
+            "suggest: retrieved %d candidates (excluding %d already-linked targets)",
+            len(candidates),
+            len(exclude_target_uuids),
         )
 
         # 5. Judge → raw suggestions.
         raw_suggestions = judge_candidates(
             candidates, note, self.store, self.settings, client=self.client
         )
+        logger.info("suggest: judge returned %d raw suggestions", len(raw_suggestions))
 
         # 6. Rank / dedup / cap / invariants.
         suggestions = self._finalize(
             raw_suggestions,
             note_id=note.id,
             exclude_target_uuids=set(exclude_target_uuids),
+        )
+        logger.info(
+            "suggest: %d final suggestions after dedup/cap (top_n=%d)",
+            len(suggestions),
+            self.settings.top_n,
         )
 
         # 7. Build the envelope.

@@ -122,3 +122,45 @@ def test_suggest_command_emits_envelope_json(corpus):
     assert envelope["version"] == 1
     assert envelope["source"]["id"] == "uuid-current"
     assert isinstance(envelope["suggestions"], list)
+
+
+def test_verbose_configures_debug_stderr_handler(corpus):
+    import logging
+
+    from notelinks import observability
+
+    # CliRunner mixes stderr into output, so assert on the logger config + that
+    # stdout still parses as the envelope JSON (stdout-purity is the contract).
+    result = runner.invoke(
+        app, ["suggest", "--corpus", str(corpus), "--verbose"], input=BUFFER
+    )
+    assert result.exit_code == 0, result.output
+    logger = logging.getLogger("notelinks")
+    assert logger.level == logging.DEBUG
+    handlers = [h for h in logger.handlers if getattr(h, "name", None) == "notelinks-stderr"]
+    assert len(handlers) == 1
+    assert handlers[0].level == logging.DEBUG
+    observability._reset_tracing_for_tests()
+
+
+def test_trace_without_extra_fails_clearly(corpus, monkeypatch):
+    # Force the trace extra to look ABSENT (so this holds even in an env where it
+    # happens to be installed). --trace must exit non-zero with the actionable
+    # message, never emitting partial JSON to stdout.
+    import builtins
+
+    real_import = builtins.__import__
+
+    def _fake_import(name, *args, **kwargs):
+        if name.startswith("phoenix") or name.startswith("openinference"):
+            raise ImportError(f"No module named {name!r}")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", _fake_import)
+
+    result = runner.invoke(
+        app, ["suggest", "--corpus", str(corpus), "--trace"], input=BUFFER
+    )
+    assert result.exit_code != 0
+    assert isinstance(result.exception, RuntimeError)
+    assert "uv sync --extra trace" in str(result.exception)

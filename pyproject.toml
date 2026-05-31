@@ -16,6 +16,19 @@ dependencies = [
     "typer>=0.26.4",
 ]
 
+# Optional 'trace' extra (T17): Arize Phoenix + OpenTelemetry tracing. NOT a core
+# dependency — observability lazy-imports these inside setup_tracing(), so the
+# package and full test suite run unchanged without the extra. Install with:
+#   uv sync --extra trace   (or: pip install 'notelinks[trace]')
+[project.optional-dependencies]
+trace = [
+    "arize-phoenix-otel>=0.16.1",
+    "openinference-instrumentation-openai>=0.1.49",
+    "openinference-semantic-conventions>=0.1.21",
+    "arize-phoenix>=16.3.0",
+    "opentelemetry-exporter-otlp>=1.30.0",
+]
+
 [project.scripts]
 notelinks = "notelinks.cli:app"
 
