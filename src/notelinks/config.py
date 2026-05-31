@@ -14,8 +14,12 @@ ignored so importing this module never fails in a foreign environment.
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Index location relative to the corpus root when ``index_dir`` is not set
+# explicitly: one Chroma store per corpus, living inside the notes folder.
+_INDEX_SUBPATH = Path("dbs") / "notelinks_index"
 
 
 class Settings(BaseSettings):
@@ -50,10 +54,14 @@ class Settings(BaseSettings):
     corpus_dir: Path | None = Field(
         default=None, validation_alias="NOTELINKS_CORPUS_DIR"
     )
-    # index_dir: Chroma persistent store location (repo-relative default), read
-    # from NOTELINKS_INDEX_DIR.
-    index_dir: Path = Field(
-        default=Path(".notelinks/index"), validation_alias="NOTELINKS_INDEX_DIR"
+    # index_dir: Chroma persistent store location, read from NOTELINKS_INDEX_DIR.
+    # Left None here so the validator below can derive it from corpus_dir
+    # (`<corpus_dir>/dbs/notelinks_index`, one index per corpus). An explicit
+    # value (init arg or NOTELINKS_INDEX_DIR) always wins; it stays None only when
+    # neither that nor corpus_dir is set — opening a Store in that state raises
+    # (no silent fallback).
+    index_dir: Path | None = Field(
+        default=None, validation_alias="NOTELINKS_INDEX_DIR"
     )
 
     # --- Chunking (token-based, tiktoken) --------------------------------------
@@ -73,6 +81,20 @@ class Settings(BaseSettings):
 
     # --- Output ----------------------------------------------------------------
     top_n: int = 12  # final ranked suggestions cap
+
+    @model_validator(mode="after")
+    def _derive_index_dir(self) -> "Settings":
+        """Default ``index_dir`` to ``<corpus_dir>/dbs/notelinks_index``.
+
+        Runs only when ``index_dir`` was left unset (no init arg, no
+        ``NOTELINKS_INDEX_DIR``): an explicit value is preserved. With no
+        ``corpus_dir`` to anchor under, it is left ``None`` — there is no silent
+        fallback; constructing a :class:`~notelinks.index.store.Store` then
+        raises.
+        """
+        if self.index_dir is None and self.corpus_dir is not None:
+            self.index_dir = self.corpus_dir / _INDEX_SUBPATH
+        return self
 
 
 @lru_cache(maxsize=1)

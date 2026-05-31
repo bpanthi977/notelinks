@@ -17,7 +17,8 @@ Resolved versions (from `uv.lock`): `tiktoken==0.13.0`, `typer==0.26.4`.
   the `config.py` default (§12).
 - `# NOTELINKS_CORPUS_DIR=` (commented) — corpus root, the org-roam notes dir;
   overridable via `--corpus` (§11/§12).
-- `# NOTELINKS_INDEX_DIR=` (commented) — persistent Chroma index location (§12).
+- `# NOTELINKS_INDEX_DIR=` (commented) — persistent Chroma index location;
+  defaults to `<corpus_dir>/dbs/notelinks_index` when unset (§7/§12).
 
 The pre-existing keys in `.env.example` (ANTHROPIC/OPENAI/ELEVEN_LABS/GOOGLE/AWS)
 were kept untouched.

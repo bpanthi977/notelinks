@@ -41,11 +41,15 @@ _RebuildOpt = Annotated[
 
 
 def _build_settings(corpus: Path | None) -> Settings:
-    """Load ``Settings`` from env / ``.env``, overriding ``corpus_dir`` if given."""
-    settings = Settings()
+    """Load ``Settings`` from env / ``.env``, overriding ``corpus_dir`` if given.
+
+    ``--corpus`` is passed as an init arg (highest precedence) and re-runs full
+    construction, so a derived ``index_dir`` follows the overridden corpus —
+    unlike ``model_copy``, which would skip the validator and leave it stale.
+    """
     if corpus is not None:
-        settings = settings.model_copy(update={"corpus_dir": corpus})
-    return settings
+        return Settings(corpus_dir=corpus)
+    return Settings()
 
 
 @app.command()

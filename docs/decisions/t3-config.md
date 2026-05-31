@@ -17,7 +17,7 @@ design §2.
 | `judge_model` | `JUDGE_MODEL` | `anthropic/claude-sonnet-4.5` | Latest Claude Sonnet OpenRouter slug; trivially swappable to a newer slug as one string. |
 | **Paths** | | | |
 | `corpus_dir` | `NOTELINKS_CORPUS_DIR` | `None` | Notes root. `None` = unset; CLI resolves from env or `--corpus` at call time (design §11). |
-| `index_dir` | `NOTELINKS_INDEX_DIR` | `.notelinks/index` | Chroma persistent store path; repo-relative, hidden dir keeps the corpus clean. |
+| `index_dir` | `NOTELINKS_INDEX_DIR` | `<corpus_dir>/dbs/notelinks_index` (derived) | Chroma persistent store path — **one index per corpus**. An explicit value (init arg or env) wins; otherwise a `model_validator(mode="after")` derives it from `corpus_dir`. With neither set it stays `None` (no silent fallback); `Store` raises on open. CLI's `--corpus` is passed as an init arg so the derived path follows the override. |
 | **Chunking** (token-based, tiktoken) | | | |
 | `chunk_target_tokens` | `CHUNK_TARGET_TOKENS` | `256` | Target chunk size (design §5). |
 | `chunk_max_tokens` | `CHUNK_MAX_TOKENS` | `400` | Hard cap before a split is forced. |

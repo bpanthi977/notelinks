@@ -154,6 +154,11 @@ the judge receives fuller context separately (§9).
 
 ## 7. Vector index & incremental refresh
 
+- **Index location:** the Chroma store is **one index per corpus**, defaulting to
+  `<corpus_dir>/dbs/notelinks_index` (derived from `NOTELINKS_CORPUS_DIR`). An
+  explicit `NOTELINKS_INDEX_DIR` overrides it; the dir (and parents) is created
+  on open. There is **no shared default** — with neither a corpus nor an explicit
+  index dir, opening the store raises rather than silently picking a path.
 - **Chunk collection** (Chroma): embeddings supplied by us; created **without**
   Chroma's built-in embedding function and always added with explicit
   embeddings, so Chroma never downloads its bundled ONNX model. Distance =
@@ -278,7 +283,8 @@ file isn't re-hashed on future runs.
 - **`config.py`** (`pydantic-settings`, env-overridable) defaults:
   `OPENROUTER_BASE_URL=https://openrouter.ai/api/v1`;
   `embedding_model=openai/text-embedding-3-small`, `embedding_dim=1536`; judge =
-  current OpenRouter Sonnet slug; `corpus_dir`, `index_dir`; chunk
+  current OpenRouter Sonnet slug; `corpus_dir`, `index_dir` (defaults to
+  `<corpus_dir>/dbs/notelinks_index`; see §7); chunk
   `target_tokens=256`, `max_tokens=400`, `overlap_tokens=32`, `min_tokens`;
   retrieval `top_k=8`, `per_source_n=3`, `global_cap_m=40`, `sim_floor`; output
   `top_n=12`; tiktoken `cl100k_base`.

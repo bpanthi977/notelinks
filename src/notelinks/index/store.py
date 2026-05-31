@@ -53,6 +53,16 @@ class Store:
 
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
+        if settings.index_dir is None:
+            raise ValueError(
+                "settings.index_dir is None; set NOTELINKS_INDEX_DIR, or set "
+                "NOTELINKS_CORPUS_DIR (--corpus) to derive it as "
+                "<corpus_dir>/dbs/notelinks_index."
+            )
+        # Create the index dir (and parents, e.g. the corpus's `dbs/`) up front.
+        # PersistentClient would create the leaf itself, but doing it explicitly
+        # makes the on-disk location predictable and ensures parents exist.
+        settings.index_dir.mkdir(parents=True, exist_ok=True)
         # anonymized_telemetry=False: no network beacons. The store is fully
         # offline — we only ever write/query explicit vectors.
         self._client = chromadb.PersistentClient(

@@ -8,6 +8,12 @@ not built-and-torn-down per call (design §2).
 
 - `chromadb.PersistentClient(path=str(settings.index_dir), settings=ChromaSettings(anonymized_telemetry=False))`.
   Telemetry off so there are no outbound beacons.
+- **`index_dir` guard + create.** `settings.index_dir` is `None` when neither
+  `NOTELINKS_INDEX_DIR` nor a `corpus_dir` to derive it from was set;
+  constructing the `Store` then raises `ValueError` (no silent fallback —
+  mirrors the `corpus_dir` guard). Otherwise the dir and its parents (e.g. the
+  corpus's `dbs/`) are created with `mkdir(parents=True, exist_ok=True)` before
+  opening the client, so the on-disk location is predictable.
 - Both collections are created with
   `get_or_create_collection(name, metadata={"hnsw:space": "cosine"}, embedding_function=None)`.
 - **`embedding_function=None` is the key.** In chromadb 1.5.9 the default value
