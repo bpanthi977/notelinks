@@ -1,0 +1,17 @@
+:PROPERTIES:
+:ID:       8f5b373b-c705-48b3-a425-308cc4d853a1
+:END:
+#+title: Uncertainty
+#+date: [2022-05-04 Wed]
+
+
+- [[id:9B467507-39E7-4F55-B03F-AD53694DBCFE][Epistemic Uncertainty]] is the uncertainty due to lack of knowledge,
+
+  In machine learning connection to Bayesian inference, an approach to
+  model epistemic uncertainity is to draw samples from posterior
+  predictive distribution which marginalizes over some posterior
+  uncertainity about the model. In simple terms, it means that we can
+  train/fit multiple models on the dataset and then draw samples from
+  those models.
+
+- Aliatoric Uncertainity (Aliator is latin for dice player) is the uncertainity due to inherent randomness

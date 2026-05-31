@@ -1,0 +1,54 @@
+:PROPERTIES:
+:ID:       C4446C23-C7AA-4327-9322-F1695F420AB7
+:END:
+#+title: Bayesian Mechanics of Transformers
+#+date:<2026-04-24 Fri>
+
+/Epistemic Status: These are notes at early stage of learning. Not all
+information has been rigorously verified. Overall ideas are most
+likely true, some details might be wrong./
+
+/Currently this note is incomplete, there more topics to
+explore to get to the Bayesian Mechanics of Transformers/
+
+* Computational Mechanics & Transformers
+
+[[id:61F4CF66-0D73-44D7-A5B2-7D5E4992D861][Computational Mechanics]] gives us the theory of optimal prediction and
+introduces us to \epsilon-machines. After having the mathematical
+background we can then we look at parallels between transformers and
+\epsilon-machines.
+
+The theory of optimal prediction provides a rigorous mathematical
+foundation for studying next token prediction or any data-generating
+process. We find that although the same process might be generated
+from multiple different models (like hidden markov models), there
+exists a canonical, and in a way the best model for each process,
+called the [[id:BB1F733D-B49A-4CCD-9B7E-37D8B94CD6ED][\epsilon-machine]]. And the hidden states of \epsilon-machine
+are called [[id:D3289D3E-847A-4239-90DD-06076D6A0262][causal states]].
+
+Optimal prediction theory suggests that any system that perfectly
+minimizes cross entropy loss on sequential data must implicitly infer
+the hidden causal states of the data-generating process. This means
+transformers might encode the causal states in their latent
+vectors. This is beacause for a network trained to minimize [[id:5924D1A5-F6C7-48F8-AFBD-D9B6A5CB0D30][cross
+entropy]] loss against the data distribution, the model is effectively
+learning to approximate the [[id:9B8F9258-60AA-4478-8BB4-360EDFA63D44][entropy rate]] (irreducible randomness) of
+the underlying process. And to do that such model necessarily need to
+encode the causal states in the latent states of the network.
+
+The latent states in a network (either recurrent like LSTM or
+feedforward networks like transformers), have all the information from
+past necessary to predict the entire future. Specifically,
+transformers represent the belief (i.e. probability distribution) over
+the causal states of the \epsilon-machines in their residual stream.
+
+Various component of transformers connect to the \epsilon-machines in
+the following way:
+
+|------------------------+--------------------------------+--------------------------------------|
+| Idea                   | Computational Mechanics        | Transformer                          |
+|------------------------+--------------------------------+--------------------------------------|
+| Causual State          | Equivalence class of histories | Residual stream of activation vector |
+| Statistical Complexity | Minimal information to store   | Embedding dimensionality             |
+| Entropy Rate           | Irreducible randomness         | Cross-entropy loss at convergence    |
+|------------------------+--------------------------------+--------------------------------------|

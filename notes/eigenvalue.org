@@ -1,0 +1,14 @@
+:PROPERTIES:
+:ID:       EA9BD92B-A510-4342-B863-A233F58DA331
+:ROAM_ALIASES: Eigenvalue Eigenvector
+:END:
+#+title: Eigenvalue & Eigenvector
+#+date:<2025-04-03 Thu>
+
+- [[id:19A3B7F5-2712-4FA6-8ACA-F273BDA026A8][Reyleigh Quotient Minimization]]
+- https://www.youtube.com/watch?v=P7yXAPFrXX4
+  - For a vector, all the invariants under rotation (change of coordinates) can be expressed as function of the vector's magnitude. i.e. magnitude of a vector is the basis for invariants
+  - For a second order tensor (i.e. matrix), its eigenvalues are the
+    basis of the invariants. This is why I think eignevalues come up
+    so often everywhere. Because they are independent of the
+    coordinates system we take.

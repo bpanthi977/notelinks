@@ -1,0 +1,46 @@
+:PROPERTIES:
+:ID:       2CA52DFA-1ACD-4CA2-B7B5-9F7A5F3BE4F4
+:END:
+#+title: Information Theory
+#+date: [2023-06-17 Sat]
+
+Information theory was originally developed to measure expected length
+of messages for optimal code in communication. This deals with
+discrete distributions. Shannon [[id:40628C21-A838-45DA-836C-2FA6E9F3B4E6][entropy]] assigns amount of uncertainity
+to an probability distribution.
+
+We can, and do, apply similar formulas for continuous distribution but
+the interpretations don't remain same, and some properties are
+lost. This is called [[id:6398DC98-3FD0-45B5-B2CA-E0D8E81F5583][Differential Entropy]]. E.g. an event with
+probability = 1 has zero information because it is guranteed to occur,
+and similarly an event with density = 1 has zero information although
+it is not guranteed to occur.
+
+
+Misc:
+
+- With perfect coding, the encoded message must be indistinguishable
+  from random.
+
+- Links and knots are 1-dimensional manifolds, but we need 4
+  dimensions to be able to untangle all of them. Similarly, one can
+  need yet higher dimensional space to be able to unknot n-dimensional
+  manifolds. All n-dimensional manifolds can be untangled in 2n+2
+  dimensions. [http://colah.github.io/posts/2014-03-NN-Manifolds-Topology/]
+
+* Mutual Information
+:PROPERTIES:
+:ID:       21DA3A30-3338-4D71-BD3F-CFF95312EB5B
+:END:
+
+Difference between the entropy of a variable and its conditional
+entropy:
+
+\begin{align*}
+I[X;Y] = H[X] - H[X|Y]
+\end{align*}
+
+Conceptually, it gives the average reduction in uncertainity about one
+variable when we know the value of another variable.
+
+This quantity is summetric, i.e. $I[X;Y] = I[Y;X]$

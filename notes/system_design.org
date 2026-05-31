@@ -1,0 +1,89 @@
+:PROPERTIES:
+:ID:       E356DD44-7B4C-4492-A5AE-6271D40B3265
+:END:
+#+title: System Design
+#+date:<2026-01-27 Tue>
+
+
+# Look for books in UAH inter library loan system.
+
+* Steps in System Design
+
+1. Analyzing requirements
+2. Designing system architecture
+   1. Data
+   2. Interfaces
+   3. Components
+3. Addressing security/scalability
+4. Documenting specifications
+
+* AI Engineer System Design Resources
+Ideas:
+
+- Inference Engines: Learn the difference between vLLM, TGI, and Ollama.
+- RAG Stack: Understand Vector DBs (Pinecone/Qdrant) and Embedding strategies.
+- Observability: Learn how to monitor Data Drift (classic) and Hallucinations/Faithfulness (LLMs).
+- Optimization: Understand Quantization (FP8, INT4) and why it’s necessary for cost-effective usage.
+
+** Full Stack Deep Learning
+
+[[id:D521D8DA-8621-49A4-82EF-CE922889CF62][fullstackdeeplearning.com]]
+- Lecture 5: Deployment
+- Lab 5: Troubleshooting & Testing
+- Lecture 7: Foundation Models
+
+** DeepLearning.ai
+
+https://www.deeplearning.ai/courses/
+
+This has short courses on specific things you want to build and
+specific topics in DeepLearning.
+
+Examples:
+1. Document AI: From OCR to Agentic Doc Extraction [[[https://www.deeplearning.ai/short-courses/document-ai-from-ocr-to-agentic-doc-extraction/][#]]]
+2. Agentic AI [[[https://www.deeplearning.ai/courses/agentic-ai/][#]]]
+3. Efficiently Serving LLMs [[[https://www.deeplearning.ai/short-courses/efficiently-serving-llms/][#]]]
+4. Multi-vector Image Retrieval [[[https://learn.deeplearning.ai/courses/multi-vector-image-retrieval/lesson/a45h1r/building-multi-modal-rag-with-colpali][#]]]
+5. Preprocessing Data for LLMs
+6. Vector Databases
+7. Building Systems with ChatGPT
+
+** Books
+
+1. [[id:A1C5882F-BF93-4A11-A43F-F178C4497F65][Designing Machine Learning Systems]] by Chip Huyen
+
+   The definitive guide for building reliable ML pipelines. It covers everything from data labeling to monitoring drift in production.
+
+2. Machine Learning System Design Interview by Ali Aminian & Alex Xu
+
+   Follows the ByteByteGo style but applied to ML problems like Recommendation Systems and Search Ranking.
+
+   # Didn't find the book online.
+
+3. [[id:9D6F25F5-D1DC-4F6C-B9BB-5E9D30F5104B][The LLM Engineering Handbook]] by Paul Iusztin & Maxime Labonne
+
+   Focuses on the "modern stack": RAG, fine-tuning, and deploying LLMs at scale.
+
+
+
+** Misc                                                           :noexport:
+
+[[pdf:/Users/bpanthi977/to read/Building Agentic AI Systems.pdf::1]]
+
+
+* Software Engineer System Design Resources
+
+1. Designing Data-Intensive Applications (2nd Edition) by Martin Kleppmann & Chris Riccomini (2026)
+
+   Still the "Gold Standard." The new edition adds vital context on cloud-native patterns and modern stream processing.
+
+   # 2017 version [[[pdf:books/Designing Data-Intensive Applications - 2017.pdf::1][pdf]]]
+   # Preview of new version in Orielly through UAH: https://learning-oreilly-com.uah.idm.oclc.org/library/view/designing-data-intensive-applications/9781098119058/ch13.html
+
+   - The best resources for learning the template of a design interview.
+   - Volume 2 covers complex topics like S3, Proximity Services, and Payment Systems.
+
+3. Building Microservices by Sam Newman
+
+   For understanding service boundaries, communication protocols
+   (gRPC, REST), and distributed transactions (Saga pattern).

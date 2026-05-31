@@ -1,0 +1,155 @@
+:PROPERTIES:
+:ID:       86AED53A-E457-4246-A5F7-C927DCE65274
+:END:
+#+title: Dreamer v1
+#+date:<2026-05-07 Thu>
+
+Notes on paper Dreamer v1 (ICLR 202) - /Dream to Control: Learning
+Behaviors by Latent Imagination/ [[[pdf:@papers/Dreamer v1 - 1912.01603v3.pdf::1++0.00][pdf]]]
+
+#+begin_quote
+We efficiently learn behaviors by propagating analytic gradients of
+learned state values back through trajectories imagined in the compact
+state space of a learned world model. On 20 challenging visual control
+tasks, Dreamer exceeds existing approaches in data-efficiency,
+computation time, and final performance.
+#+end_quote
+
+* Problem
+
+A partially observable Markov decision process with
+1. Discrete time steps
+2. Continous vector-valued actions
+
+
+* Representations
+
+1. Learning latent dynamics model (using Recurrent State-Space Model):
+   - Representation model: $p_{\theta}(s_t | s_{t-1}, a_{t-1}, o_t)$
+   - Transition model: $q_{\theta}(s_t| s_{t-1},a_{t-1})$
+   - Reward model: $q_{\theta}(r_t|s_t)$
+
+   (Notation: $p$ for distributions in real enivornment, $q$ for their approximations)
+
+2. Learning action and value model
+   - Action model (Policy): $a_{\tau} \sim q_{\phi}(a_{\tau}|s_{\tau})$
+   - Value model $v_{\psi}(s_{\tau}) \approx \mathbb E_{q(\cdot | s_{\tau})} \left[ \sum_{\tau=t}^{t+H} \gamma^{\tau-t}r_{\tau} \right]$
+
+* Learning
+
+1. Interaction with the environment updates the representation model,
+   transition model and reward model.
+
+2. In the dream, trajectories are imagined $H$ timesteps ahead
+   transition model and action model.  Then using the predicted reward
+   and values, the value and action model are updated. For
+   action/policy update, gradient through learned dynamics model is
+   taken.
+
+3. The updated action model + exploration noise is used to interact
+   with the environment and the process repeats.
+
+* Results
+
+- Tested on 20 continous control tasks in DeepMind Control Suite. [See
+  [[pdf:@papers/Dreamer v1 - 1912.01603v3.pdf::20++0.00][#pg. 20]]]
+- Exceeded model-based approach (PlaNet), model-free approach (D4PG)
+  in data-efficiency, computation time and performance
+
+* Limitations
+
+1. /My opinion:/ The DMC environment has dense rewards. For sparse
+   reward, I believe this method won't do much good.
+   - ball in cup (cup catch) looks sparse but even a random agent can
+     get reward
+   - [[https://github.com/google-deepmind/lab/blob/master/game_scripts/levels/contributed/dmlab30/README.md#watermaze][DMLab]] watermaze has sparse reward. But that is about exploring
+     everything and remembering. [[[https://www.youtube.com/watch?v=XaI6SjFcmd0][YT]]]
+
+2. Dreamer didn't do well on most of the Atari games [See [[pdf:@papers/Dreamer v2 - 2010.02193v4.pdf::1++0.00][Figure 1 in
+   Dreamer v2]]]. Only a handful of them [See [[pdf:@papers/Dreamer v1 - 1912.01603v3.pdf::16++0.00;;annot-16-10][Figure 9 in Dreamer v1]]].
+
+* World Model
+
+The way to represent the dynamics model (world model) using Recurrent
+State-Space Model (RSSM) was taken from PlaNet [[[pdf:@papers/PlaNet - Learning Latent Dynamics for Planning from Pixels - 1811.04551v5.pdf::1++0.00][pdf]]] (which was also
+the work of Danijar Hafner).
+
+Following are components of the loss function:
+
+1. $J_D = -\beta \textrm{KL}(p(s_t|s_{t-1},a_{t-1}, o_t) || q(s_t|s_{t-1}, a_{t-1}))$
+2. $J_R = \ln q(r_t | s_t)$
+
+To learn the representation for the state, there can be various
+approaches. Three approaches were taken in the paper:
+
+1. Reward only: In principle the dynamics models (representaion,
+   transition, reward) could be trained jointly, solely by predicting
+   future rewards given action and past observation. But for finite
+   dataset and sparse rewards that doesn't give good results.
+
+   $J = J_D + J_R$
+
+2. Reconstruction: Train an observation model $q_\theta(o_t|s_t)$
+   alongside the dynamics models. Now the state representation has to
+   be able to do reconstruction.
+
+   $J = \ln q(o_t | s_t) + J_D + J_R$
+
+3. Contrastive estimation: Train a state model $q_\theta(s_t|o_t)$ and
+   to prevent collapse ensure that the representations in a training
+   batch are different.
+
+   $J = \ln q(s_t | o_t) - \ln {\left( \sum_{o'} q(s_t | o') \right)} + J_D + J_R$
+
+The pixel recontruction outperformed the constrastive estimation
+method in many tasks.
+* Action model
+
+Action model outputs a tanh-transformed Gaussian, and reparameterized
+sampling is used to backpropagate gradients through sampling
+operations. For discrete actions, straight through gradient estimate
+is used.
+
+\begin{align*}
+a_\tau = \tanh(\mu_\phi (s_\tau) + \sigma_\phi(s_\tau) \epsilon), \ \ \epsilon \sim \textrm{Normal}(0, \mathbb I)
+\end{align*}
+
+Action model is trained to maximize the value estimate, and gradients
+are propagated through the learned dynamics model. The the following
+equation, gradient of value estimate $V_\lambda$ is computed which
+depends on reward prediction (via reward model), which depend on
+imagined states (via transition model), which depends on imagined
+actions (via action model):
+
+\begin{align*}
+\phi \leftarrow \phi + \alpha \nabla_{\phi} \sum_{\tau=t}^{t+H}V_{\lambda}(s_{\tau})
+\end{align*}
+
+
+* Value Model
+
+Value model $v_{\psi}(s_{\tau})$ is trained to regress toward value
+target $V_\lambda(s_\tau)$. Gradients are not passed through
+$V_\lambda(s_\tau)$:
+\begin{align*}
+V_{\lambda}(s_{\tau}) = (1-\lambda) \sum_{n=1}^{H-1} \lambda^{n-1}V_N^n(s_{\tau}) + \lambda^{H-1}V_N^H(s_{\tau}) \\
+\textrm{where, } V_N^k(s_{\tau}) = E_{q_{\phi}, q_{\psi}} \left[ \sum_{n=\tau}^{h-1}\gamma^{n-\tau}r_n + \gamma^{h-\tau}v_{\psi}(s_h) \right]
+\end{align*}
+
+:noexport:
+Which is same as
+
+\begin{align*}
+V_{\lambda}(s_{\tau}) = r_\tau + \gamma_t
+\begin{cases}
+(1-\lambda) v_{\psi}(s_{\tau+1}) + \lambda V^{\lambda}_{\tau+1} & \textrm{ if } \tau < H \\
+v_{\psi}(s_{\tau}) & \textrm{ if } \tau = H
+\end{cases}
+\end{align*}
+:end:
+
+* See Also
+
+1. [[id:A5E0D24E-C1DB-4157-9E86-AFA2D78E5D7B][Dreamer v2]]
+2. [[id:9FCF9CDA-0450-4F70-B2C5-D27CBB437C65][Dreamer v3]]
+3. [[id:5D2A9680-5378-4DA3-8C95-4EC361798502][Dreamer v4]]

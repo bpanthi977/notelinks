@@ -1,0 +1,124 @@
+:PROPERTIES:
+:ID:       A5E0D24E-C1DB-4157-9E86-AFA2D78E5D7B
+:END:
+#+title: Dreamer v2
+#+date:<2026-05-07 Thu>
+
+Notes on paper [[id:A5E0D24E-C1DB-4157-9E86-AFA2D78E5D7B][Dreamer v2]] (ICLR 2021) - /Mastering Atari With Discrete
+World Models/ [[[pdf:@papers/Dreamer v2 - 2010.02193v4.pdf::1++0.00][pdf]]]
+
+#+begin_quote
+DreamerV2 constitutes the first agent that achieves human-level
+performance on the Atari benchmark of 55 tasks by learning behaviors
+inside a separately trained world model.
+#+end_quote
+
+
+* Representations
+
+1. Latent dynamics model (World Model):
+
+   Transition Dynamics (Using Recurrent State Space Model):
+   - Recurrent Model: $h_t = f_{\phi}(h_{t-1}, z_{t-1}, a_{t-1})$
+   - Transition Predictor: $p_{\phi}(\hat z_t|h_t)$
+
+   Latent representation:
+   - Representation model: $q_{\phi}(z_t| h_t, x_t)$
+   - Image predictor: $p_{\phi}(\hat x_t| h_t, z_t)$ - Similar to reconstruction model in Dreamer v1
+
+   Others:
+   - Reward model: $p_{\phi}(r_t|h_t,z_t)$
+   - Discount predictor: $p_{\phi}(\gamma|h_t, z_t)$ . This is
+     bernoulli model, with $\gamma = 0$ when at terminal state, and
+     $\gamma = 0.999$ when at non terminal state.
+
+2. Behaviour model
+   - Actor: $p_\psi (a_t | \hat z_t)$
+   - Critic: $v_\zeta(\hat z_t) \sim E_{p_{\phi}, p_{\psi}} {\left[ \sum_{\tau \ge t} \hat \gamma^{\tau-t} \hat r_{\tau} \right]}$
+
+   Citic loss function uses $\lambda$ target, same as in Dreamer V1.
+
+* Changes
+
+Summary of Modifications compared to [[id:86AED53A-E457-4246-A5F7-C927DCE65274][Dreamer v1]] is listed in [[pdf:@papers/Dreamer v2 - 2010.02193v4.pdf::18++0.00][Appendix
+C]]:
+
+1. Using categorical variables for latent state instead of Gaussian
+  latents used in Dreamer V1 [[[pdf:@papers/Dreamer v2 - 2010.02193v4.pdf::2++0.00;;annot-2-57][Section 2.1]]]
+
+  32 variables with 32 classes each. [[[pdf:@papers/Dreamer v2 - 2010.02193v4.pdf::3++0.00][Figure 2]]]
+2. REINFORCE for learning policy. But for the task (Continuous Control)
+   that dreamer v1 sovled, they still use the gradients from value
+   estimation.
+3. KL Balancing
+4. Bigger model size
+
+
+* Ablation
+
+[See [[pdf:@papers/Dreamer v2 - 2010.02193v4.pdf::9++0.00][Figure 2]]]
+
+Following components have a significant role in Dreamer v2
+performance. The number in the bracket is the mean score when that
+component is removed. Compare with normal case mean score of 0.25.
+
+1. (0.01) Graidents from image reconstruction learning latent state. But
+   gradient from reward model for learning state didn't impact much.
+2. (0.15) REINFORCE loss function is neccesary for learning unbiased
+   policy. Using value estimate gradients didn't work for Atari.
+3. (0.16) KL Balancing
+4. (0.19) Discrete Latents
+
+:noexport:
+_Limitations:_
+1. Different policy update rule for Atari and Continous control.
+:end:
+
+* Dynamics model
+:PROPERTIES:
+:CUSTOM_ID: 20260507_CnAI_dynamics_model
+:END:
+
+Loss function for world model is a sum of the following:
+
+1. Image reconstruction: $-\ln p_{\phi}(x_t|h_t, z_t)$
+2. Reward: $-\ln p_{\phi}(r_t| h_t, z_t)$
+3. Discount: $-\ln p_{\phi}(\gamma_t|h_t, z_t)$
+4. Transition Dynamics: $\beta KL \left[ q_{\phi}(z_t| h_t, x_t) || p_{\phi}(z_t | h_t) \right]$
+
+   This is KL loss where the transition model is the prior, and
+   representation model is the posterior. And KL loss tries to bring
+   both together. But learning a transition model is difficult than
+   learning a representation model. So, we want to put more weight on
+   transition model being similar to representation model rather than
+   vice versa. This can be doen by KL balancing ($\alpha = 0.8$):
+
+   #+begin_src python
+     kl_loss =      alpha  * compute_kl(stop_grad(representation_posterior), transition_prior)
+             + (1 - alpha) * compute_kl(representation_posterior, stop_grad(transition_prior))
+   #+end_src
+* Action model
+
+There are three components to the loss function:
+1. REINFORCE loss function with state value $v_{\zeta}(\hat z_t))$ as
+   baseline:
+
+   $-\rho \ln p_{\psi}(a_t|\hat z_t) sg(V_t^{\lambda} - v_{\zeta}(\hat z_t))$
+
+   This is used only for Atari $\rho=1$.
+
+2. Gradients of the $\lambda$ value estimate backpropagating through
+   discrete latent dyanmics model and discrete actions using
+   straight-through graidents.
+
+   $- (1-\rho) V_t^{\lambda}$
+
+   This is used only for continuous control $\rho=0$.
+
+3. Entropy regularizer $-\eta H[a_t| z_t]$
+
+* See also
+
+1. [[id:86AED53A-E457-4246-A5F7-C927DCE65274][Dreamer v1]]
+2. [[id:9FCF9CDA-0450-4F70-B2C5-D27CBB437C65][Dreamer v3]]
+3. [[id:5D2A9680-5378-4DA3-8C95-4EC361798502][Dreamer v4]]

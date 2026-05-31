@@ -1,0 +1,240 @@
+:PROPERTIES:
+:ID:       8FB1B9AD-B19B-4A4D-A469-7F5DFA81B9FC
+:END:
+#+title: LLM Architecture
+#+date:<2026-04-18 Sat>
+
+The journey of [[id:F41C46C0-E4D5-4DEF-9D54-A9078268D4B4][Transformer]] has been driven by task performance,
+hardware efficiency and context size:
+
+1. Backbone moved to decoder only network
+2. Position Embedding: RoPE allows infinite sequence length generalization
+3. GQA and FlashAttention made Attention hardware efficient
+4. MoE allowed scaling of parameter counts decoupled from inference cost
+5. Future might lead to sub-quadratic hybrid merging Attention and
+   State Space Models.
+
+* Tweet                                                           :noexport:
+
+The journey of Transformer has been driven by task performance,
+context size and hardware efficiency.
+
+1. Decoder only models won because they are easier to train with
+   internet data and are more versatile.
+
+2. Positional Embedding: RoPE allows better sequence length
+   generalization contrast to original sinusoidal embedding.
+
+3. GQA and FlashAttention made Attention hardware efficient.
+
+4. MoE allowed scaling of parameter count to be decoupled from
+   inference cost.
+
+5. Future might lead to sub-quadratic hybrid architectures merging
+   Attention and State Space Models.
+
+Link to more detailed notes: [[https://bpanthi977.com/braindump/llm.html]]
+
+* Encoder Decoder
+
+Before settling to decoder only models, we had encoder only, and
+encoder-decoder models (See [[id:E61B4EB9-CF47-4631-A2EA-81F614406C34][Types of LLM Architecture]]). Here are some
+popular models:
+
+1. BERT (Bidirectional Encoder Representations from Transformers)
+  - encoder only model
+  - for discriminative tasks (sentiment analysis, classification)
+
+2. BART (Bidirectional and Auto-Regressive Transformers)
+  - encoder-decoder model for generative tasks (summariazation, dialogue)
+
+3. T5 (Text-to-Text Transfer Transformer)
+  - encoder-decoder model
+  - Universal tasks: Translation, summarization, and question answering.
+
+But now architecture have converged to decoder only networks. Because
+of the following benefits:
+- empirical superiority in zero-shot generalization
+- in-context learning
+- parameter efficient because single module learns representation for
+  both input and output sequences
+- computation efficiency: parallel training and easy to use internet
+  data. no need to have input-output pair
+- bidirection attention provides too much information early on and
+  hinders development of predictive patters but attention matrix is
+  lower triangular
+
+Q&A:
+#+begin_quote
+Q: Some sources cite, decoder only model is faster than
+encoder-decoder model. Can't KV cache be used in encoder-decoder
+models?
+
+A: Yes it can. And as long as input to encoder doesn't change this
+provides same benefit as for decoder only models.
+#+end_quote
+
+* Positional Encoding
+
+- Traditionally transformers used sinusoidal positional encoding. But
+  this pollutes semantic information with positional information.
+
+- Now a days, relative positional embeddings (RPE) is used. RoPE
+  (Rotary Position Embeddings) has become standard.
+
+
+** RoPE (Rotary Position Embedding)
+
+Rotates queries and keys (but not value vectors) in complex vector
+space
+- for each pair of dimension, 2D rotation is applied with angle based
+  on absolute position.
+- some pair rotate slower (storing more semantic information) while
+  some pairs rotate faster
+- vector norm is maintained
+- dot product between query and key is function of relative distance
+
+Benefits:
+- With scaling techniques (Position Interpolation, YaRN), RoPE help
+  model work for long context windows that they were trained for.
+- semantic information is less polluted with position information
+
+Scaling Techniques:
+- Position Interpolation maps (scales) the absolute position for long
+  sequence to smaller range. i.e. For model trained on 2K length, if
+  we want 8K length then we scale the position by 1/4 before
+  converting to angles.
+- YaRN does the scaling but it scales different frequency angles
+  differently.
+
+** ALiBi (Attetion with Linear Biases)                            :noexport:
+
+It adds linear penalty to attentions scores based on distance between
+tokens. This creates different attention heads focusing on local
+context and global context. This is niche techinque.
+
+But some experiments showed that sometimes attention heads collapse
+towards beginning-of-sequence tokens.
+
+Also, ecosystem and tools like FlashAttentions, vLLM support RoPE.
+
+* Optimization
+
+** Grouped Query Attention
+
+Memory traffic required to load the $N \times N$ attention matrix is
+the primary constraint for throughput.
+
+In Multi-Head Attention (MHA) each head has unique query and key which
+leads to large KV cache.
+
+Multi Query Attention (MQA) shares a single key and value across all
+query heads.
+
+Grouped Query Attention (GQA) provides a middle ground. Heads are
+grouped and each group has same KV cache. This gives similar accuracy
+to MHA while having 4-8x smaller KV cache.
+
+GQA is now a standard technique used in Llama 3 and Mistral.
+
+** FlashAttention
+
+Exact attention
+- Uses a tiling strategy to break Q, K, V matrices into smaller blocks that fit in SRAM
+- Fuses all attention steps matmul, softmax, weighted sum
+
+This prevents the needs to write intermediate $N \times N$ matrices
+back to HBM.
+
+Developments:
+- FlashAttention-1 => quadratic to linear memory usage - tiling
+- FlashAttention-2 => 3x faster - better parallelization
+- FlashAttention-3 => Targets H100 GPUs - uses some warps for data
+  movement thus hiding memory latency
+
+** Sliding Window Attention
+
+For 100k+ tokens architectural changes are needed to be practical.
+
+In Sliding-Window Attention (SWA) each token attends to a sliding
+window of previous W tokens.
+
+Also a "Rolling buffer Cache" is used, it KV cache needs to only be
+maintained for last W tokens, new K, V values replace old ones in the
+cache.
+
+Global information flows indirectly through layers of network.
+
+| Sparsity Technique | Memory Complexity | Remarks                        |
+|--------------------+-------------------+--------------------------------|
+| Sliding Windows    | O(N W)            | O(W) with rolling buffer cache |
+| Sparse Attention   | O(N \sqrt N)      | Depends on sparsity pattern    |
+| Longformer         | O(N (W + G))      |                                |
+
+- Sliding window and longformer are both type of Sparse Attention
+- Longformer is used for long documents and each token attends to its
+  surrounding token (Sliding window) and some selected global tokens.
+
+** Mixture of Experts
+
+- The Feed forward network is replaced by multiple independent
+  experts. An expert is a standard 2-layer MLP.
+
+- A router (gating network) computes probability distribution and
+  selects top-k (top-1 or top-2) experts. The capacity of router in
+  indentifying high-level features in hidden states determine the what
+  experts specialize in.
+
+- Load balancing loss: Uneven distribution is penalized to prevent
+  router from always choosing same expert. This regularization loss,
+  called auxiliary loss, can conflict with the main cross-entropy
+  loss. DeepSeek-V3 has auxiliary loss free approach.
+
+- Experts are sharded across GPUs. If a single expert becomes
+  bottelneck, the token is skipped through residual connection, or
+  another expert is choosen.
+
+| Model        | Active Parameters | Total Experts | Active |
+|--------------+-------------------+---------------+--------|
+| Mixtral 8x7B | 47 B -> 13 B      |             8 |      2 |
+| DeepSeek-V3  | 685 B -> 37 B     |           256 |      8 |
+| Gemma 4 MoE  | 27 B -> 4 B       |           128 |      8 |
+
+
+DeepSeek-V3 Auxiliary-Loss-Free Load Balancing (ALF-LB): Each expert
+has a bias which offsets the router's probability distribution. The
+bias value is updated during training based on the load the expert
+recieves. This does load balancing without polluting the gradients.
+
+* Sub-Quadratic Alternatives
+
+Objective is to replace attention with something that scales linearly
+with context window.
+
+1. [[id:2F81ADD5-41A9-4E8A-B3E0-CCFF74BBD311][Mamba]] - Selective State Space Model
+   - Uses recurrent network but the transition matrix depends on the input
+   - Achieved 5x higher inference throughput
+   - Higher context recall
+   - But struggles with zero-shot and in-context learning.
+2. KWKV - Receptance Weighted Key Value
+   - RNN like
+   - Parallel mode for traning and recurrent mode for inference
+
+Hybrids:
+1. TransMamba
+2. Jamba
+3. Attention-to-SSM distillation
+4. Bamba: hybrid of Mamba-2 and Attention has shown 25% less training
+   compute while being equal quality with Llama 3.1 8B.
+
+   This uses attention head required for in-context learning and SSM
+   layer for global persistence.
+
+Q&A:
+#+begin_quote
+Q: Why are SSM not good at in-context learning?
+
+A: Because of the hidden state bottleneck they can't store all the
+information needed later on. In contrast, for transformers attention
+mechanism allows any token to attend to any previous token.
+#+end_quote

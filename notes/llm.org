@@ -1,0 +1,11 @@
+:PROPERTIES:
+:ID:       D0695344-C3CD-404E-B42C-9AD042C938BD
+:ROAM_ALIASES: "Large Language Model"
+:END:
+#+title: LLM
+#+date:<2026-04-17 Fri>
+
+This page got big, so I moved each section to individual pages:
+1. [[id:8FB1B9AD-B19B-4A4D-A469-7F5DFA81B9FC][LLM Architecture]]
+2. [[id:38DE6ED3-95CF-4C1A-BE9E-601C80AE327B][LLM Pre-training]]
+3. [[id:AE384333-FE7C-4013-A283-F54EBB746DD5][LLM Post-training]]

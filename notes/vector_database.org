@@ -1,0 +1,187 @@
+:PROPERTIES:
+:ID:       2529E821-54E3-48E8-8C27-01D6F78C86D5
+:END:
+#+title: Vector Database
+#+date:<2026-05-03 Sun>
+#+options: ^:nil
+
+When creating a RAG system, one of the early decisions is which
+database to use. These are my notes when trying to figure out the
+factors to consider and comparision between various alternatives.
+
+Sources:
+- 18 Months of Pgvector Learnings in 47 Minutes (Tutorial)  https://www.youtube.com/watch?v=Ua6LDIOVN1s&t=1405s
+- https://www.tigerdata.com/blog/pgvector-vs-qdrant
+- https://milvus.io/docs/overview.md
+
+* Relevant Factors
+
+These are some of the key ideas to understand and factors one needs to
+consider when evaluating a database for its usefullness as vector
+database.
+
+** Vector Indexing Algorithms
+
+Bruteforce doesn't scale. So we need ANN (Approximate Nearest
+Neighbour). Some, popular algorithms for vector indexing/search are:
+
+- IVF FLAT - low memory usage but requires index rebuild.
+
+- HNSW (Hierachical Navigable Small World) - good balance in scale and
+  accuracy, but some implementation (pgvectorscale) require storing
+  the all the data in memory, while some (qdrant) store frequent
+  vectors in memory and others in disk.
+
+- DiskANN - Scales, low memory, no index rebuild, but slow initial
+  index build time. DiskANN stores compressed representation in the
+  index page and not the full vector.
+
+So, in overall DiskANN is the choice. HNSW might also be a sensible
+choice for smaller number of vectors
+
+** Filtering
+
+Filtering is another important aspect. If you get the vector search
+results and then filter, i.e. you are doing post-filtering, you might
+have fewer items than needed. So, filter aware ANN is better if you
+have highly selective filters.
+
+- Qdrant, Milvus have good filtering support. i.e. native filtering or
+  filter aware HNSW
+
+- pgvectorscale has a streaming api, so although it is post-filtering
+  , if there are insufficient results after filterging, more items
+  will be queried. This is not seen to the user.
+
+So, for filtering case vector database will be more efficient.
+
+** Latency & Throughput
+
+According to [[https://www.tigerdata.com/blog/pgvector-vs-qdrant][this]] study, Postgres had higher throughput than
+Qdrant. But Qdrant had better p99 latency than Postgres, although both
+were in <100 ms p99 latency range.
+
+So, in overall Postgres can be sufficient for your workloads.
+
+** Hybrid Search
+
+Another factor to consider is do we need text/keyword based search in
+addition to vector search (semantic search).
+
+*** BM25
+:PROPERTIES:
+:ID:       DAB3BF74-6DB1-4548-A844-DB29E60D5849
+:ROAM_ALIASES: "Best Matching 25"
+:END:
+
+Best Matching 25
+
+- Term Frequency Saturation - Mentioning a word 12 times doesn't make a
+  doc 12 more relevant. After a few mentions, additional repetitions
+  barely help. Spam loses.
+
+- Inverse Document Frequency (IDF) - Rare terms matter more. When
+  searching for "Database Authentication" if, "Database" appears
+  everywhere, it's noise. If, "Authentication" appears once, it's a
+  signal. BM25 weights accordingly.
+
+- Length Normalization - A focused 15-word tip about your query beats
+  an 80-word doc that mentions it in passing. BM25 adjusts for
+  document length.
+
+- Ranked Retrieval - Every doc gets a meaningful relevance score, not
+  just "matches" or "doesn't match". Partial matches still appear,
+  just ranked lower.
+
+The 25 in the name of the algorithm comes from the number of
+iterations the creators went through in the development of the
+retrieval system where BM25 was used.
+
+*** Reciprocal Rank Fusion
+:PROPERTIES:
+:ID:       BB14BF01-1012-4F27-83CC-64BF33AF39CD
+:END:
+
+To merge the results from vector search and lexical BM25 search, use
+Reciprocal Rank Fusion:
+
+RRF works by calculating a score for each document based on its
+position across different rankings—assigning higher importance to
+items ranked highly in multiple lists—using the formula: where
+
+\begin{align*}
+Score(d) = \sum_{r \in R} \frac 1 {k + rank(r,d)}
+\end{align*}
+
+where $k$ is a constant (typically 60)
+
+This is frequently used in modern search engines, Retrieval-Augmented
+Generation (RAG) pipelines, and recommendation systems to combine
+different retrieval models (dense, sparse, hybrid)
+
+* Software Comparision
+** Postgres
+
+pgai, pgvector and pgvectorscale make Postgres ready for RAG workflows.
+
+Pros:
+- Mature
+- Relational database features
+- High throughput compared to Qdrant
+- pg_search, pg_textsearch extension gives BM25 indexing and fuzzy
+  search
+
+  In comparision Elasticsearch is much more featureful in terms of
+  text search, and is much more distributed (giving up ACID for
+  evetual consistency).
+
+Cons:
+- Post Filtering
+- Not for billion vectors scale. upto 100-500M vectors is good.
+- The default fult text search =tsvector= does exact keyword finding
+  but not fuzzy matching and ranking.
+- Doesn't compute embedding itself (it can through pgai extension, but
+  that is not a good idea, because database transaction would now be
+  longer)
+
+** Qdrant
+
+Pros:
+- Low latency
+- Native filtering
+- Scales to ~1B vectors
+- Support for BM25 search as well
+
+Cons:
+- Not a relational db
+- Doesn't scale to tens/hundreds of billions of records like Milvus
+- Don't compute embedding itself
+
+** Milvus
+
+Pros:
+- Native filtering
+- Highly scalable and distributed. 100B vectors
+- BM25 search as well
+- Can compute embedding itself
+
+Cons:
+- Complex setup.
+
+** Elasticsearch
+
+(or the opensource fork Opensearch)
+
+Pros:
+- Text/keyword search, typo tolerance
+- Scales to billions of vectors
+- Distributed and horizontally scalable
+- Supports complex queries for text search
+- ML Integration (embedding, anomaly detection, forecasting-style
+  analysis, and data frame analytics for classification or regression
+  workflows)
+
+Cons:
+- Not a realtional db, so might require data syncing
+- Milvus is better for frequent vector inserts and deletes.
+- Milvus is faster (p50 and p99 latency) for pure vector search

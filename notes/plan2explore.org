@@ -1,0 +1,91 @@
+:PROPERTIES:
+:ID:       D46A3C31-BAF2-40A1-9631-75EFADD49FBF
+:END:
+#+title: Plan2Explore
+#+date:<2026-05-08 Fri>
+
+Notes on paper Plan2Explore (PMLR 2020) - Planning to Explore via Self-Supervised World Models [[[pdf:@papers/Planning to Explore via Self-Supervised World Models - 2005.05960v2.pdf::1++0.00][pdf]]]
+
+_Problem:_
+
+Objective is to do exploration of environment without any task
+specific information. Then when given the task, be able to do the task
+in zero shot or few shot.
+
+#+begin_quote
+Without any training supervision or task-specific interaction,
+Plan2Explore outperforms prior self-supervised exploration methods,
+and in fact, almost matches the performances oracle which has access
+to rewards.
+#+end_quote
+
+_Prior Approaches:_
+
+To explore, an agent could (See [[pdf:@papers/Planning to Explore via Self-Supervised World Models - 2005.05960v2.pdf::1++0.00;;annot-1-26][Intrinsic Motivation section]])
+
+- seek inputs that it cannot yet predict
+- maximally influence its inputs
+- visit rare states
+
+Prior work, mostly model free, first collected data, and filtered the
+trajectory according to above conditions. This wastes resources.
+
+
+_Solution:_
+1. Learn a world model
+2. During exploration phase, in imagineed world, train a exploration
+   policy optimized to maximize intrinsic rewards.
+3. Use task specific reward function to label the replay buffer with
+   reward. And train a task specific agent (new actor & critic) in
+   imagination. This is the zero-shot agent.
+
+_Exploration Objective:_
+
+An ideal exploration objective should seek states that maximize
+epistemic uncertainity and be robust to aleatoric uncertainity. This
+is formalized in the expected information gain ([[https://projecteuclid.org/journalArticle/Download?urlId=10.1214%2Faoms%2F1177728069][Lindley, 1956]]). Here
+disagreement in prediction of ensemble of one-step models is used as
+exploration objective.
+
+_Results:_
+- The world model learnt by other (like Dreamer) is doesn't generalize
+  zero-shot to different tasks. But world model learnt by Plan2Explore
+  does generalize. [See [[pdf:@papers/Planning to Explore via Self-Supervised World Models - 2005.05960v2.pdf::7++0.00][Figure 5]]]
+- They test on dm_control.
+
+* Model
+
+Latent Dynamics model:
+- Image encoder: $h_t=e_{\theta}(o_t)$
+- Prior dynamics: $p_{\theta}(s_t|s_{t-1}, a_{t-1})$ - Predicts without access to image
+- Posterior dynamics: $q_{\theta}(s_t | s_{t-1}, a_{t-1}, h_t)$ - Predicts witch access to image
+- Reward predictor: $p_{\theta}(r_t|s_t)$
+- Image decoder: $p_{\theta}(o_t|s_t)$
+
+  The distributions are parameterized as diagonal gaussain. Optimized
+  jointly by minimizing ELBO.
+
+Action & Value model trained by Dreamer v1 inside the latent dynamics
+model:
+- Action: $\pi(a_t|s_t)$
+
+  Policy optimized by value estimate gradients. [See [[pdf:@papers/Planning to Explore via Self-Supervised World Models - 2005.05960v2.pdf::3++0.00;;annot-3-25][#pg 3]]]
+
+- Value: $V(s_t)$
+
+Latent Disagreement Ensemble (E):
+- Encoder prediction: $q(h_{t+1} | w_k, s_t, a_t) = \mathcal{N}(\mu(w_k,s_t, a_t), 1)$
+
+  There are $K$ different models with different weights $w_k$
+  implemented as 2 hidden layer MLP.
+
+- Disgreement reward: $D(s_t,a_t) = \text{Var}(\{\mu(w_k, s_t, a_t) | k \in [1;K]]\})$
+
+  This disagreement is positive for novel states but given enough
+  samples, it reduces to zero even for stochastic environments because
+  all one-step predictions converge to mean of the next input.
+
+Task specific reward model:
+- After initial exploration, a task reward function is used to label
+  the states in replay buffer with rewards. Then a reward predictor
+  model is trained on that data.

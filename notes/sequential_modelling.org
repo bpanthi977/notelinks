@@ -1,0 +1,37 @@
+:PROPERTIES:
+:ID:       6936E548-C4F7-4B06-94E8-40BAC1B3060D
+:END:
+#+title: Sequence Modeling
+#+date: [2023-03-18 Sat]
+
+See [[id:B81B32C3-D182-4BDC-9235-8079D7C250CB][RNN and Transformers (MIT 6.S191 2022)]] for lecture video link.
+
+#+CAPTION: Squential Model Application 
+[[file:data/mit_6_s191_introduction_to_deep_learning/squential_model_application-20230314091644.png]]
+
+* Example Tasks 
+Example of Sequence Modeling tasks: 
++ Sequential Input -> One Output : Sentiment Classification
++ One Input -> Sequential Output: Image Captioning
++ Sequential Input -> Sequential Output: Machine Translation 
+
+* Sequence Modelling: Design Criteria
+To model sequences, we need to: 
++ Handle *variable-length* sequences
++ Track *long-term* dependencies
++ Maintain information about *order*
++ *Share parameters* across the sequence
+
+** Example Task: Predict the Next Word
+
+First we need to address *Embedding*: i.e. How to represent language to a Neural Network? (@ 0:23:10)
++ One-hot embedding
++ Learned Embedding (0:25:50 Representation Learning)
+
+#+CAPTION: Encoding Language for NN
+[[file:data/mit_6_s191_introduction_to_deep_learning/encoding_language_for_nn-20230316093655.png]]
+
+Now observe that this problem demands all the *Design Criteria* for sequential modelling: 
++ 0:26:30 Variable-Length : Sentences are not of fixed size
++ 0:26:38 Long-term dependencies: An Idea in the beginning of a text influences the meaning till the end. 
++ 0:27:07 Sequence Order: Order of words in a sentence matter.

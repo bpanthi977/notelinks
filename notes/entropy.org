@@ -1,0 +1,151 @@
+:PROPERTIES:
+:ID:       40628C21-A838-45DA-836C-2FA6E9F3B4E6
+:END:
+#+title: Entropy
+#+date: [2022-11-24 Thu]
+#+edited: [2025-10-25 Sat]
+
+Average amount of [[id:2CA52DFA-1ACD-4CA2-B7B5-9F7A5F3BE4F4][information]] that you get from a
+message. [[https://youtu.be/ErfnhcEV1O8?t=240]]
+
+_Noiseless coding theorem:_
+
+Entropy is a lower bound on the number of bits needed to transmit the
+state of a random variable.
+
+Entropy of a discrete random variable $X$ that takes state $S_{i}$
+with probability $p_{i}$ is $H(X) = - \sum_i p_i \log p_i$
+
+See also:
+- [[id:5924D1A5-F6C7-48F8-AFBD-D9B6A5CB0D30][Cross Entropy]]
+- [[id:331fe8b6-1707-4e24-9764-0fa52d556d45][Negative Entropy]]
+
+* Statistical Mechanics
+
+Consider a set of $N$ identical objects divided among $M$ bins
+such that $i$ -th bin has $n_i$ objects. Number of different ways of
+allocating the objects to the bins is called multiplicity:
+
+\begin{align*}
+W = \frac {N!} {\prod_i n_i!}
+\end{align*}
+
+Here we don't distinguish objects in same bins.
+
+Entropy is then logarithm of multiplicity scaled by a constant:
+
+\begin{align*}
+H = \frac 1 N \ln W
+\end{align*}
+
+As $N \to \infty$ and $n_i / N$ are held constant
+
+\begin{align*}
+H = - \sum_i p_i \ln p_i
+\end{align*}
+
+where, $n_i / N \to p_i$
+
+In physics, the arrangement of objects in the bins is called a
+microstate and overall distribution $n_i/N$ is called macrostate. $W$
+is also called the weight of the macrostate. In the famous Boltzmann's equation:
+
+\begin{align*}
+S = k \ln W
+\end{align*}
+$W$ is the number of possible microstates in a macrostate and $k$ is Boltzmann's constant.
+
+_Maximum Entropy:_
+
+Maximum entropy of the system can be found by maximizing H with the normalization contraint $\sum p_i = 1$. And upon doing so, we find that the entropy is highest when all the probabilities are equal $p_i = 1/M$. The corresponding entropy is then $H = \ln M$.
+
+* Differential Entropy
+:PROPERTIES:
+:ID:       6398DC98-3FD0-45B5-B2CA-E0D8E81F5583
+:END:
+
+For a continuous random variable $x$, we could discretize $x$ in
+$\Delta$ steps and compute the entropy and the relation turns out to be:
+
+\begin{align*}
+H = \sum_i \ln p(x_i) p(x_i)  \Delta - \ln \Delta
+\end{align*}
+
+But this diverges as $\Delta \to 0$ because of the second term $\ln
+\Delta$. This happens because to specify a continous variable very
+precisely requires a large number of bits. Thus, for continuous case
+we discard the second term and define entropy as:
+
+\begin{align*}
+H[x] = - \int p(x) \ln p(x) dx
+\end{align*}
+
+This is called /Differential Entropy/.
+
+There is no rigorous theory behind the derivation/formula. Some
+problems with this formula is that
+1. it can give negative value for entropy,
+2. it is unit dependent. changing the unit say from meters to
+   milimeters shifts the value of $H$ by $\ln(1000)$.
+
+Another more theoritical sound formula is [[https://en.wikipedia.org/wiki/Limiting_density_of_discrete_points][Limiting density of discrete
+points (LDDP)]]. However differential entropy is used more. Because at
+the end the things that are more valuable are:
+
+1. [[id:F9FEB7AC-23B4-496F-877D-D1E3019C40BC][Kullback-Leibler Divergence]]
+
+   \begin{align*}
+   D_{KL}(f || g) = \int f(x) \ln \frac {f(x)}{g(x)} dx
+   \end{align*}
+
+   It is not dependent on the units and is always non-zero.
+
+2. Mutual Information
+
+   \begin{align*}
+   &I(X;Y) = H(X) + H(Y) - H(X,Y) \\
+   &I(X;Y) = H(X) - H(X|Y)
+   \end{align*}
+   where,
+   - $H(X,Y)$ is the entropy of joint distribution of $X$ and $Y$.
+   - $H(X|Y)$ is the entropy of $X$ conditioned on knowing the value of $Y$.
+
+   Mutual information is also not dependent on the units and is non zero.
+
+3. Maximum Entropy Principle
+
+   MEP holds valid in the continous case when using differential entropy.
+
+All three are interpretable and give valid results for the definition
+of differential entropy.
+
+
+** Maximum Entropy
+:PROPERTIES:
+:ID:       9E185F19-501A-4C4C-BD7B-8D57105C70AE
+:ROAM_ALIASES: "Gaussian maximizes entropy for a given mean and variance"
+:END:
+
+If we maximize $H[x]$ subject to constraints:
+
+\begin{align*}
+\int p(x) dx &= 1 \\
+\int x p(x) dx &= \mu \\
+\int (x - \mu)^2 p(x) dx &= \sigma^2
+\end{align*}
+
+Then, the [[id:80C8C0F5-35FF-4214-A835-CA928038C12B][gaussian distribution]] maximizes the entropy:
+
+
+\begin{align*}
+p(x) = \frac 1 {(2 \pi \sigma^2)^{1/2} } \exp \left\{ - \frac {(x-\mu)^2} {2\sigma^2} \right\}
+\end{align*}
+
+The maximum entropy is:
+
+\begin{align*}
+H[x] = \frac 1 2 ( 1 + \ln 2\pi \sigma^2 )
+\end{align*}
+
+Also, note that Differential Entropy, unlike discrete entropy, can be
+negative.

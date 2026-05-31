@@ -1,0 +1,76 @@
+:PROPERTIES:
+:ID:       C09EE53A-A3D7-422E-B7C4-C2A24C098400
+:END:
+#+title: SIMD in Mac
+#+date:<2025-04-25 Fri>
+
+# [[pdf:@CS613/hw5/sol.pdf::6++0.00]]
+
+Mac M1 to M3 use ARMv8-A (also known as AArch64, ARM64) instruction set. Previously Mac laptops used to use Intel's x86-64 ISA (also called AMD64). While the new M4 uses ARMv9-A instruction set.
+
+The primary SIMD instruction set architecture implemented across all Apple Silicon M-series chips (M1 through M4) is ARM's Advanced SIMD extension, commonly known as *NEON*.
+
+* Hardware
+
+NEON uses 128-bit vector, so it can operate on:
+- 2 64 bit double float
+- 4 32 bit single float
+- 8 16 bit integers or half floats
+- 16 8 bit integers
+
+It provides operations like:
+- arithmetic (addition, multiplication, subtraction, fused multiply-add)
+- logical operations
+- comparisions
+- shuffling
+
+Superscalar:
+- M1 has 4 NEON execution pipelines
+
+Registers:
+- 32 vector registers
+
+To check the ISA features available in your computer run the following [[[https://developer.apple.com/documentation/kernel/1387446-sysctlbyname/determining_instruction_set_characteristics][developer.apple.com]]]:
+
+#+begin_src shell
+  sysctl  "hw.optional"
+#+end_src
+
+* Programming
+
+To use NEON we can use the intrinsics functions from =arm_neon.h= header file in C/C++/Objective-C.
+
+See the NEON programmer guide from ARM [[[https://developer.arm.com/documentation/102159/0400/Overview][arm.com]]]. This has a really good articles to understand the concepts and get started with using NEON in assembly.
+
+** Example
+
+#+begin_src C
+  // Function to perform vector addition using NEON intrinsics
+  void vector_add_neon(uint8_t *a, uint8_t *b, uint8_t *result, int n) {
+    int i;
+    for (i = 0; i < n - 16; i += 16) {
+      uint8x16_t vec_a = vld1q_u8(&a[i]);
+      uint8x16_t vec_b = vld1q_u8(&b[i]);
+      uint8x16_t vec_result = vaddq_u8(vec_a, vec_b);
+      vst1q_u8(&result[i], vec_result);
+    }
+    for (; i < n; i++) {
+      result[i] = a[i] + b[i];
+    }
+  }
+
+  // Function to perform vector addition without NEON intrinsics (for comparison)
+  void vector_add_scalar(uint8_t *a, uint8_t *b, uint8_t *result, int n) {
+  #pragma clang loop vectorize(disable)
+    for (int i = 0; i < n; i++) {
+      result[i] = a[i] + b[i];
+    }
+  }
+#+end_src
+* AMX and SME
+
+M-series CPUs also have a proprietary extension to the ARM ISA called AMX (*Apple Matrix Extensions*) which is not documented for the public. It is only accessible through the Accelerate framework which provides higher level APIs like BLAS and BNNS (neural network).
+
+AMX operates on a conceptual grid of compute units (32 x 32) capable of performing multiply accumulate operations. AMX processes data in fixed-size tiles or blocks, performing operations like outer products between elements of the X and Y registers and accumulating results in the Z registers.
+
+With M4 chips Apple seems to have transitioned from AMX to ARM's standard SME (*Scalable Matrix Extensions*) with the adoption of ARMv9.2-A ISA.

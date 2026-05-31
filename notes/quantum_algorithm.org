@@ -1,0 +1,267 @@
+:PROPERTIES:
+:ID:       9B436CB8-AB3C-4BB3-9655-B690A9DC85A0
+:END:
+#+title: Quantum Algorithms
+#+date:<2026-03-08 Sun>
+
+This article notes somequantum algorithms and how they work, at the
+level I currently understand. Before we start, some
+terminology/acronyms to be used later:
+
+- NISQ - We are currently in Noisy Intermediate-Scale Quantum (NISQ) era.
+- FTQC - We don't have Fault-Tolerant [[id:1acb04bc-1e37-43b5-b1f0-5ba22fc949a2][Quantum Computing]] (FTQC) yet.
+- QUBO - Quadratic Unconstrained Binary Optimization
+- VQA - Variational Quantum Algorithm
+- VQE - Variational Quantum Eignesolver
+- QAOA - Quantum Approximate Optimization  Algorithm
+
+* Grover's Algorithm
+:PROPERTIES:
+:ID:       C2ECD909-DA6F-4D9E-9AD1-29707199AE64
+:END:
+
+BBBV Theorem in 1994 proved that quantum search can't be done any
+faster than $O(\sqrt N)$.
+
+After two years in 1996, Grover found the exact algorithm that does it
+in $\frac \pi 4 \sqrt N$.
+
+_Problem definition:_
+
+Given a function $f(x)$ that returns True for only one $x$ (called the
+key) and False for everything else, we need to find the $x$ for which
+$f$ is true. This is a search problem.
+
+
+_Solution:_
+
+Classic way to do it is to execute the function for all inputs and
+stop when you find the key. This takes $O(N)$.
+
+Now, if we have a boolean function repesented by a circuit of
+classical gates that returns 0 or 1 then we can convert it to an
+equivalent quantum circuit that flips the sign of amplitude for state
+that are True and leaves the False state same.
+
+So, now we have a quantum circuit that flips the sign of the "key"
+state. Changing the sign of state doesn't change the probability
+amplitude but using further steps we can increase the amplitude of
+that particular state and decrease others and thus effectively finding
+out the "key" state.
+
+Reference:
+- 3Blue1Brown - But what is quantum computing? (Grover's Algorithm) - [[https://www.youtube.com/watch?v=RQWpF2Gb-gU][YT]]
+
+_Issues:_
+
+- Sub-quadratic Advantage: For practical problems, the state of the
+  art analog algorithm are not $O(N)$ brute force, but rather have
+  good heuristics. Thus the advantage from Grover is below quadratic.
+
+_Resolution:_
+
+- Use as sub routine: Instead of using Grover to solve the whole
+  problem, it can be used in conjunction with classical or other
+  quantum algorithm to solve part of the problem. This hybrid approach
+  has lead to better results.
+
+  # This has been applied to:
+  # 1. Dynamic Programming
+  # 2. Constrained optimization
+  # 3. Branch and bound approximations
+
+* Quantum Adiabatic Algorithm
+:PROPERTIES:
+:ID:       58F5FAE9-F568-4547-BE27-E3D5FDCBB79D
+:END:
+
+_Problem:_
+
+We need to find the exact optimal value of an optimization problem.
+
+_Solution:_
+
+In QAA the optimization problem is expressed as in terms of a target
+physical system whose ground state is the optimal value.
+
+QAA solves the optimization problem by doing continuous evolution of
+physical quantum system to the target system. In analog quantum
+computers this is done by continuously manipulating the magnetic
+fields or the coupling strengths between the qubits. In digital
+gate-based computers, it is approximated by quantum circuits evolving
+the descretized version of physical quantum system using quantum
+gates.
+
+Lets first look at the formulation for physical system, and then we
+can look at practical approximations.
+
+_Solution for Analog Quantum System:_
+
+Let's first understand two terms:
+1. Problem Hamiltonian (H): QAA requires us to be able to create a
+   physical system whose ground state is the optimal solution.
+
+   A physical system is defined by its Hamiltonian. So, in other word
+   we need a system with Hamiltonian (H) and if we can get to the
+   ground state of H we have the solution.
+
+2. Mixing Hamiltonian ($H_x$): This is a system whose ground state has
+   the solution state. Typically, the ground state of $H_x$ is the
+   state which is equal superposition of all pure states.
+
+Now, we start with ground state of $H_x$ system. And yes, lets assume
+it is feasible to start the system in ground state of $H_x$. Then we
+continuously evolve the system to $H$, all the while keeping the
+process so slow that the state is always in the ground state. The
+physical system at time $t$ is:
+
+\begin{align*}
+H(t) = \lambda (t/T) H + (1 - \lambda (t/T)) H_x
+\end{align*}
+
+So, the system evolves as $H(t)$ for time $T$ while being in ground
+state of $H(t)$ at all times. And thus at time $T$ we are in ground
+state of $H(t) = H$ which is the optimal value of the optimization
+problem.
+
+_Solution in Digital Gate based systems:_
+
+We convert the continuous evolution into discrete evolution by passing
+through quantum gates. This approximation is known as Trotterization.
+
+Since true adiabatic transition requires long time, the discrete
+equivalent requires very deep quantum circuits. And also requires
+fault tolerant quantum circuits.
+
+_Issues:_
+
+1. Spectral Gap: Difference between ground state and first excited
+   state.
+
+   For complex optimization problems the spectral gap decreases
+   exponentially as problem size increases. And thus the time for
+   adiabatic evolution also increases exponentially.
+
+2. Requires deep & fault tolerant circuits for discrete systems
+
+_Resolution:_
+
+1. Diabatic Annealing: Instead of exact optima, be satisfied with
+   inexact optima. Allows the system to go to higher energy states and
+   thus runs faster.
+2. Repeat Runs: Run the algorithm faster than adaibatic limit but run
+   it multiple times
+3. Counter-diabatic annealing: Add penalty erms that suppress the
+   system from jumping to higher energy state during faster anneal
+4. Variational approximation of QAA: Quantum Approximate Optimization
+   Algorithm (QAOA).
+
+** Quantum Approximate Optmization Algorithm
+:PROPERTIES:
+:ID:       CE62B866-84DC-4BA2-B33F-6A5268C443B3
+:ROAM_ALIASES: QAOA
+:END:
+
+- Seminar on how to do QAOA on Bridges-2 system using CUDA-Q - Niraj Nepal:
+  [[https://www.psc.edu/events/bridges-2-webinar-series/qaoa-utilizing-cuda-q-on-bridges-2/][psc.edu]] [[[pdf:data/quantum_algorithm/QAOA using CUDA-Q.pdf][pdf]]]
+
+# TODO: Why does this need to be variational, i.e. what are there
+# parameters to learn?
+
+* Quantum Phase Estimation
+:PROPERTIES:
+:ID:       B3146415-6D25-416B-88D8-17B52A50264A
+:END:
+
+_Problem:_
+
+The problem again is to find the exact optima of an optimization
+problem.
+
+QPE approaches this problem by finding the eigenvalue of unitary
+operators and thus equivalently finding the eigenvalues and ground
+states of Hamiltonian.
+
+(Note: It is also called finding eigenphase of unitary operators
+because for unitary operators the eigenvalues have magnitude one, thus
+the phase is what matters and so eigenvalues are equivalently called
+the eigenphase.)
+
+Thus the problem in terms of QPE is to find the eignvalues of a
+matrix. That matrix in turns represents our optimization problem.
+
+_Solution:_
+
+QPE does this by using quantum equivalent of lots of matrix
+operations. I don't know the details yet.
+
+# But it requires tools from:
+# 1. Quantum Signal processing
+# 2. Quantum Singular Value Transformations
+# 3. Block-encoding
+
+_Shor's Algorithms:_
+
+The core of Shor's alogrithm is QPE. Factoring of large numbers can be
+expressed as quadratic unconstrained binary optimization (QUBO)
+problem. And QPE provides exponential speedup for some subsets of
+QUBO.
+
+_Issues:_
+
+- Algorithmic Complexity: There are lots of operations which results
+  to a complex circuit.
+- FTQC: The algorithmic complexity makes QPE unviable for NISQ
+  devices, and requires large-scale, error corrected FTQC devices.
+
+* Gibbs Sampling
+
+- Preparation of Gibbs state is the most challenging
+- MCMC like Gibbs sampling using Quantum Phase Estimation have high
+  algorithmic complexity (QMA-Hard)
+- For NISQ Variational Quantum Algorithm are more promising
+
+Uses:
+- Can be used as subroutine for Convex Optimization problems for
+  Semidefinite Programming
+- Quantum simulated annealing approaches to count combinatorial objects
+  - k-coloring
+  - graph matchings
+
+* Variational Quantum Algorithms
+:PROPERTIES:
+:ID:       7C1B8712-1576-4E85-A471-B94E38E9DECC
+:END:
+
+_Problem and Approach:_
+
+VQA is a heuristic approach that uses hybrid quantum-classical loop.
+
+The loop is between parameterized quantum circuit that evaluates a
+cost function and a classical optimizer that updates the parameters of
+the circuit to optimize the cost.
+
+Using this approach different kinds of problems can be solved. So, VQA
+is a class of algorithms.
+
+_Issues:_
+- NP-hard : Finding optimal parameters is a NP-hard problem similar to
+  NP-hard training of classical neural networks. So, VQA algorithms
+  typically lack provable run time or performance guarantees and are
+  rather viewed as heuristic solvers.
+
+- Barren Plateaus: As the number of qubits increases, the optimization
+  landscape can become exponentially flat.
+
+  Thus the classical optimizer cannot find useful gradient to update
+  the parameters. This is a central bottleneck preventing VQAs from
+  scaling up to practical problems.
+
+  These problems can be avoided if a good warm-starting strategy is
+  known. i.e. a way to start with parameters that are near the optima.
+
+_Uses:_
+1. Variational Quantum Eigensolver (VQE) - Gives lower bound on the
+   true ground state energy.
+2. Quantum Approximate Optimization Algorithm (QAOA) - A variant of
+   VQE for QUBO problem.
