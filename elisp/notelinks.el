@@ -368,7 +368,6 @@ where KEPT is plists and DISCARDED is `notelinks-sug' structs."
     (overlay-put ov 'notelinks-sug s)
     (overlay-put ov 'face 'notelinks-suggestion)
     (overlay-put ov 'keymap notelinks-overlay-map)
-    (overlay-put ov 'help-echo #'notelinks--help-echo)
     (setf (notelinks-sug-overlay s) ov)
     ov))
 
@@ -456,10 +455,6 @@ where KEPT is plists and DISCARDED is `notelinks-sug' structs."
             (format "\n→ %s" loc)
             (when (and excerpt (not (string-empty-p excerpt)))
               (format "\n  \"%s\"" excerpt)))))
-
-(defun notelinks--help-echo (_window object _pos)
-  (let ((s (overlay-get object 'notelinks-sug)))
-    (and s (notelinks--describe s))))
 
 ;;;; Navigation
 
