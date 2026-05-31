@@ -50,12 +50,16 @@ The wrapper depends only on the agreed signature (typed via a `Protocol`,
 store.query_chunks(
     embedding, k=settings.top_k,
     exclude_note_uuid=current_note_uuid,
-    exclude_target_uuids=exclude_target_uuids,
 ) -> list[tuple[Chunk, float]]  # (target_chunk, cosine_similarity), best-first
 ```
 
-Self-exclusion and already-linked exclusion are pushed *into* the query (no
-retrieval budget spent on them). All four knobs (`top_k`, `per_source_n`,
+Only **self-exclusion** is pushed into the query. **Already-linked exclusion is
+heading-level** and applied as a post-query filter on candidate chunks via
+`pipeline/exclude.py:chunk_already_linked` — a note-level `$nin` would
+over-exclude headings the source hasn't linked (a link to one heading of a note
+would suppress the whole note). See design §8 for the per-form rules
+(heading-text link → that heading; heading own-id link → that heading; bare
+whole-note link → preamble only). All four knobs (`top_k`, `per_source_n`,
 `global_cap_m`, `sim_floor`) come from the injected `Settings`.
 
 ## Tests

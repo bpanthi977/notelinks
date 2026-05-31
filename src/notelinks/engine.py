@@ -28,9 +28,10 @@ from notelinks import observability
 from notelinks.config import Settings
 from notelinks.index import build
 from notelinks.index.store import Store
-from notelinks.models import Envelope, Source, Suggestion
+from notelinks.models import Envelope, OrgLink, Source, Suggestion
 from notelinks.org.chunk import chunk_note
 from notelinks.org.parse import parse_note
+from notelinks.pipeline.exclude import suggestion_duplicates_link
 from notelinks.pipeline.judge import judge_candidates
 from notelinks.pipeline.retrieve import retrieve_candidates
 from notelinks.providers import embeddings, llm
@@ -156,8 +157,11 @@ class Engine:
                 len(source_chunks),
             )
 
-            # 3. Already-linked targets are never re-suggested.
-            exclude_target_uuids = [link.target_uuid for link in note.links]
+            # 3. Already-linked targets are never re-suggested. Exclusion is
+            #    heading-level (design §8): a link to one heading of a note
+            #    suppresses only that heading; a bare whole-note link suppresses
+            #    only the note's preamble.
+            existing_links = note.links
 
             # Retrieval wrapped in a (no-op-unless-traced) RETRIEVER span so the
             # vector-search step shows in the same Phoenix trace as the judge calls.
@@ -168,13 +172,14 @@ class Engine:
                     source_embeddings,
                     settings=self.settings,
                     current_note_uuid=note.id,
-                    exclude_target_uuids=exclude_target_uuids,
+                    existing_links=existing_links,
                 )
                 span.record_candidates(candidates)
             logger.info(
-                "suggest: retrieved %d candidates (excluding %d already-linked targets)",
+                "suggest: retrieved %d candidates (filtering headings already "
+                "linked by %d existing links)",
                 len(candidates),
-                len(exclude_target_uuids),
+                len(existing_links),
             )
 
             # 4. Judge → raw suggestions.
@@ -187,7 +192,7 @@ class Engine:
             suggestions = self._finalize(
                 raw_suggestions,
                 note_id=note.id,
-                exclude_target_uuids=set(exclude_target_uuids),
+                existing_links=existing_links,
             )
             logger.info(
                 "suggest: %d final suggestions after dedup/cap (top_n=%d)",
@@ -214,16 +219,18 @@ class Engine:
         suggestions: list[Suggestion],
         *,
         note_id: str,
-        exclude_target_uuids: set[str],
+        existing_links: list[OrgLink],
     ) -> list[Suggestion]:
         """Drop invalid, dedup, stable-sort by confidence, cap, renumber (design §10).
 
         Invariants:
 
         * No self-links (``target.file_id == note_id``).
-        * No suggestion to an already-linked target (``target.file_id`` in the
-          exclusion set) — belt-and-suspenders; retrieval already excludes these,
-          but the judge could still emit one via target_is_note edge cases.
+        * No suggestion that would assemble to a link the note already has
+          (:func:`~notelinks.pipeline.exclude.suggestion_duplicates_link`) —
+          heading-level, belt-and-suspenders behind the retrieval filter, which
+          is authoritative; the judge could still promote a non-excluded chunk to
+          a whole-note target that duplicates an existing bare link.
 
         Dedup: at most one suggestion per ``(target.file_id, heading text|None)``,
         keeping the highest confidence.
@@ -235,11 +242,12 @@ class Engine:
         Finally cap to ``settings.top_n`` and reassign ``s01``, ``s02``, … ids in
         final order.
         """
-        # Drop invalid (self-links + already-linked targets).
+        # Drop invalid (self-links + suggestions duplicating an existing link).
         kept: list[Suggestion] = [
             s
             for s in suggestions
-            if s.target.file_id != note_id and s.target.file_id not in exclude_target_uuids
+            if s.target.file_id != note_id
+            and not suggestion_duplicates_link(s.target, existing_links)
         ]
 
         # Dedup by (target file_id, heading text or None), keeping highest confidence.

@@ -203,9 +203,21 @@ file isn't re-hashed on future runs.
 
 - **Queries** = every chunk of the current note (its own index entry refreshed
   first).
-- **Query filters:** exclude self (`note_uuid != current`) and exclude
-  already-linked target uuids — no retrieval spent on notes you've already
-  linked.
+- **Query filter:** exclude self (`note_uuid != current`) at the vector query.
+- **Already-linked exclusion is heading-level** (`pipeline/exclude.py`), applied
+  as a post-query filter on candidate chunks (not a note-level `$nin` on the
+  query, which would over-exclude headings the source hasn't linked). A candidate
+  target chunk is dropped when the source already references *its* heading:
+  - `[[id:U::*H]]` → drops only chunks of note `U` under heading text `H`; other
+    headings of `U` stay eligible.
+  - `[[id:HID]]` (a heading's own org-id) → drops the chunk carrying `heading_id == HID`.
+  - `[[id:U]]` (bare whole-note link) → drops only `U`'s **preamble**
+    (`heading_index == 0`); headed sections stay eligible.
+
+  The output stage repeats this at link-identity granularity
+  (`suggestion_duplicates_link`) as belt-and-suspenders: a suggestion is dropped
+  if it would assemble to a link the note already has (e.g. the judge promoting a
+  non-excluded chunk to a whole-note target that duplicates a bare link).
 - **top_k = 8** neighbours per source chunk.
 - A **candidate** = `(source_chunk, target_chunk, score)`. Duplicate
   `(source, target)` pairs dedup; a target chunk hit by multiple sources keeps
@@ -252,8 +264,8 @@ file isn't re-hashed on future runs.
 - **Cross-target dedup:** at most **one suggestion per (target note + heading)**,
   keeping the highest confidence; the same note may still appear under different
   headings.
-- **Engine-enforced invariants:** no self-links; no `mention` suggestion to an
-  already-linked target; output sorted + capped.
+- **Engine-enforced invariants:** no self-links; no suggestion that would
+  duplicate an existing link (heading-level — see §8); output sorted + capped.
 - **Connection type enum:** `elaborates`, `analogous-mechanism`, `contradicts`,
   `instance-of`, `generalizes`, `mention`.
 

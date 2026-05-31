@@ -43,8 +43,9 @@ rebuild=...)` and returns its stats dict (`indexed`/`reindexed`/`skipped`/
    on-disk copy is excluded by `note.id`, so the two never collide.
 4. **Embed** the buffer's chunk `embed_text`s with the shared client.
 5. **Retrieve** candidates, excluding the current note's own chunks
-   (`current_note_uuid=note.id`) and every already-linked target
-   (`exclude_target_uuids = [l.target_uuid for l in note.links]`).
+   (`current_note_uuid=note.id`) and any candidate whose heading the source
+   already links (`existing_links=note.links`, filtered heading-level by
+   `pipeline/exclude.py` — see design §8).
 6. **Judge** the candidates into raw `Suggestion`s.
 7. **Rank / dedup / cap / invariants** (`_finalize`, design §10 — see below).
 8. **Envelope**: `version=1`, `Source(file=rel_path, title, id, queried_at=<UTC
@@ -57,9 +58,11 @@ rebuild=...)` and returns its stats dict (`indexed`/`reindexed`/`skipped`/
 Applied in this order:
 
 1. **Drop invalid**: any suggestion with `target.file_id == note.id` (no
-   self-links) or `target.file_id ∈ exclude_target_uuids` (already-linked).
-   Retrieval already excludes both, so this is belt-and-suspenders against a
-   judge `target_is_note` edge case.
+   self-links) or one that would duplicate an existing link
+   (`suggestion_duplicates_link`, heading-level — design §8). Retrieval already
+   filters already-linked headings, so this is belt-and-suspenders against a
+   judge promoting a non-excluded chunk to a whole-note `target_is_note` that
+   duplicates a bare link.
 2. **Dedup**: keep at most one suggestion per `(target.file_id, heading text or
    None)`, keeping the highest `confidence`. Iterating in incoming order means a
    tie keeps the first-seen (earlier-ranked) one.

@@ -1,27 +1,41 @@
 """Tests for the retrieval selection core and query wrapper (design §8)."""
 
 from notelinks.config import Settings
-from notelinks.models import Chunk
+from notelinks.models import Chunk, OrgLink
 from notelinks.pipeline.retrieve import retrieve_candidates, select_candidates
 
 
-def make_chunk(note_uuid: str, ordinal: int, text: str = "body") -> Chunk:
+def make_chunk(
+    note_uuid: str,
+    ordinal: int,
+    text: str = "body",
+    *,
+    heading_text: str | None = None,
+    heading_id: str | None = None,
+    heading_index: int = 0,
+) -> Chunk:
     """Minimal synthetic Chunk; chunk_id = f'{note_uuid}:{ordinal}'."""
     return Chunk(
         note_uuid=note_uuid,
         note_path=f"{note_uuid}.org",
         note_title=note_uuid,
         heading_path="",
-        heading_text=None,
-        heading_id=None,
-        heading_level=None,
-        heading_index=0,
+        heading_text=heading_text,
+        heading_id=heading_id,
+        heading_level=None if heading_text is None else 1,
+        heading_index=heading_index,
         chunk_in_heading=0,
         ordinal=ordinal,
         char_start=0,
         char_end=len(text),
         text=text,
         embed_text=text,
+    )
+
+
+def _link(target_uuid: str, search_string: str | None = None) -> OrgLink:
+    return OrgLink(
+        target_uuid=target_uuid, search_string=search_string, char_start=0, char_end=0
     )
 
 
@@ -96,15 +110,8 @@ class FakeStore:
         *,
         k: int,
         exclude_note_uuid: str,
-        exclude_target_uuids: list[str],
     ) -> list[tuple[Chunk, float]]:
-        self.calls.append(
-            {
-                "k": k,
-                "exclude_note_uuid": exclude_note_uuid,
-                "exclude_target_uuids": exclude_target_uuids,
-            }
-        )
+        self.calls.append({"k": k, "exclude_note_uuid": exclude_note_uuid})
         return self._responses[embedding[0]]
 
 
@@ -128,7 +135,7 @@ def test_retrieve_candidates_dedups_target_seen_by_two_sources() -> None:
         [[1.0], [2.0]],
         settings=settings,
         current_note_uuid="S",
-        exclude_target_uuids=["X"],
+        existing_links=[],
     )
 
     # The shared target appears exactly once, keeping its best pairing (s2 @ 0.9).
@@ -140,7 +147,73 @@ def test_retrieve_candidates_dedups_target_seen_by_two_sources() -> None:
     # The other target survives too; two distinct targets total.
     assert {c.target_chunk.chunk_id for c in out} == {"T:0", "U:0"}
 
-    # Store contract was exercised with the configured knobs / filters.
+    # Store contract was exercised with the configured knobs (self-note excluded
+    # at the query; already-linked filtering is now heading-level, post-query).
     assert store.calls[0]["k"] == 8
     assert store.calls[0]["exclude_note_uuid"] == "S"
-    assert store.calls[0]["exclude_target_uuids"] == ["X"]
+
+
+def test_retrieve_filters_already_linked_heading_only() -> None:
+    """Heading-level exclusion: a heading link drops only that heading's chunk."""
+    src = make_chunk("S", 0)
+    # Note T, two headings: "Alpha" (already linked) and "Beta" (not linked).
+    t_alpha = make_chunk("T", 0, heading_text="Alpha", heading_index=1)
+    t_beta = make_chunk("T", 1, heading_text="Beta", heading_index=2)
+
+    store = FakeStore({1.0: [(t_alpha, 0.9), (t_beta, 0.8)]})
+    settings = Settings(top_k=8, per_source_n=3, global_cap_m=40, sim_floor=0.2)
+
+    out = retrieve_candidates(
+        store,
+        [src],
+        [[1.0]],
+        settings=settings,
+        current_note_uuid="S",
+        existing_links=[_link("T", "*Alpha")],  # links heading Alpha of T
+    )
+
+    # Alpha is suppressed; the sibling heading Beta still surfaces.
+    assert {c.target_chunk.chunk_id for c in out} == {"T:1"}
+
+
+def test_retrieve_whole_note_link_excludes_only_preamble() -> None:
+    """A bare ``[[id:T]]`` suppresses only T's preamble (heading_index 0)."""
+    src = make_chunk("S", 0)
+    t_pre = make_chunk("T", 0, heading_index=0)  # preamble
+    t_head = make_chunk("T", 1, heading_text="Body", heading_index=1)
+
+    store = FakeStore({1.0: [(t_pre, 0.9), (t_head, 0.8)]})
+    settings = Settings(top_k=8, per_source_n=3, global_cap_m=40, sim_floor=0.2)
+
+    out = retrieve_candidates(
+        store,
+        [src],
+        [[1.0]],
+        settings=settings,
+        current_note_uuid="S",
+        existing_links=[_link("T")],  # bare whole-note link
+    )
+
+    # Preamble dropped; the headed section stays eligible.
+    assert {c.target_chunk.chunk_id for c in out} == {"T:1"}
+
+
+def test_retrieve_heading_own_id_link_excludes_that_heading() -> None:
+    """A bare ``[[id:HID]]`` (heading's own id) drops the chunk with that id."""
+    src = make_chunk("S", 0)
+    t_head = make_chunk("T", 0, heading_text="Body", heading_id="HID-1", heading_index=1)
+    t_other = make_chunk("T", 1, heading_text="Other", heading_index=2)
+
+    store = FakeStore({1.0: [(t_head, 0.9), (t_other, 0.8)]})
+    settings = Settings(top_k=8, per_source_n=3, global_cap_m=40, sim_floor=0.2)
+
+    out = retrieve_candidates(
+        store,
+        [src],
+        [[1.0]],
+        settings=settings,
+        current_note_uuid="S",
+        existing_links=[_link("HID-1")],  # links the heading by its own org-id
+    )
+
+    assert {c.target_chunk.chunk_id for c in out} == {"T:1"}

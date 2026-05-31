@@ -15,7 +15,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Protocol
 
-from notelinks.models import Candidate, Chunk
+from notelinks.models import Candidate, Chunk, OrgLink
+from notelinks.pipeline.exclude import chunk_already_linked
 
 if TYPE_CHECKING:
     from notelinks.config import Settings
@@ -89,14 +90,18 @@ def retrieve_candidates(
     *,
     settings: Settings,
     current_note_uuid: str,
-    exclude_target_uuids: list[str],
+    existing_links: list[OrgLink],
 ) -> list[Candidate]:
     """Query the Store for each source chunk, dedup targets, then select.
 
     For each ``(source_chunk, embedding)`` pair, calls ``store.query_chunks``
-    with the fixed contract. A target chunk hit by multiple source chunks keeps
-    only its single best-scoring pairing (design §8 dedup). The surviving hits
-    are regrouped into ``hits_by_source`` and ordered by :func:`select_candidates`.
+    excluding only the current note's own chunks (``exclude_note_uuid``).
+    Already-linked targets are dropped **per chunk** via
+    :func:`~notelinks.pipeline.exclude.chunk_already_linked` (heading-level —
+    note-level ``$nin`` would over-exclude headings the source hasn't linked).
+    A target chunk hit by multiple source chunks keeps only its single
+    best-scoring pairing (design §8 dedup). The surviving hits are regrouped into
+    ``hits_by_source`` and ordered by :func:`select_candidates`.
     """
     # Best (source_chunk, similarity) seen per target chunk_id.
     best_for_target: dict[str, tuple[Chunk, Chunk, float]] = {}
@@ -105,9 +110,12 @@ def retrieve_candidates(
             embedding,
             k=settings.top_k,
             exclude_note_uuid=current_note_uuid,
-            exclude_target_uuids=exclude_target_uuids,
         )
         for target_chunk, sim in hits:
+            # Heading-level already-linked filter: skip a target whose heading
+            # the source already links (or the preamble of a whole-note link).
+            if chunk_already_linked(target_chunk, existing_links):
+                continue
             tid = target_chunk.chunk_id
             existing = best_for_target.get(tid)
             if existing is None or sim > existing[2]:
