@@ -11,3 +11,7 @@ google-cloud-cli-*.tar.gz
 
 # Byte-compiled elisp
 *.elc
+
+/notes/dbs/
+/.claude/
+/.dir-locals.el
