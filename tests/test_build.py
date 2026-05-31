@@ -181,7 +181,12 @@ def test_touch_advances_watermark_without_reindex(corpus, spy):
     assert stats["skipped"] == 3
     after = store.get_manifest("gamma.org")
     assert after["content_hash"] == before["content_hash"]
-    assert after["last_indexed_mtime"] == new_mtime  # watermark advanced
+    # Watermark advanced to the file's current mtime. Compare (with float tolerance)
+    # against the re-stat'd value rather than the raw new_mtime we passed to utime —
+    # the filesystem may round the stored mtime, which made the exact `== new_mtime`
+    # check flaky in full-suite runs.
+    actual_mtime = (corpus_dir / "gamma.org").stat().st_mtime
+    assert after["last_indexed_mtime"] == pytest.approx(actual_mtime)
     assert after["last_indexed_mtime"] > before["last_indexed_mtime"]
 
     # And a subsequent run with no mtime change re-hashes nothing either.
