@@ -79,6 +79,9 @@ When nil the engine falls back to its own NOTELINKS_CORPUS_DIR."
 (defvar-local notelinks--panel-current nil
   "The suggestion last rendered in the info panel (to avoid needless redraws).")
 
+(defvar-local notelinks--panel-source nil
+  "In the panel buffer, the source note buffer whose review it belongs to.")
+
 (defconst notelinks--panel-buffer-name "*notelinks-review*"
   "Name of the buffer shown in the bottom info/keys side window.")
 
@@ -599,15 +602,35 @@ where KEPT is plists and DISCARDED is `notelinks-sug' structs."
             "(move onto a highlighted suggestion to see its details)")
           "\n\n" notelinks--panel-keys))
 
+(defvar notelinks-panel-mode-map
+  (let ((m (make-sparse-keymap)))
+    (define-key m "q" #'notelinks-panel-quit)
+    m)
+  "Keymap for the info/keys side panel buffer.")
+
+(define-derived-mode notelinks-panel-mode special-mode "NoteLinks-Panel"
+  "Major mode for the notelinks info/keys side panel.")
+
+(defun notelinks-panel-quit ()
+  "Close the panel and quit the review session it belongs to."
+  (interactive)
+  (let ((src notelinks--panel-source))
+    (if (buffer-live-p src)
+        (progn (pop-to-buffer src)   ; leave point in the note, not the dying panel
+               (notelinks-quit))
+      (notelinks--hide-panel))))
+
 (defun notelinks--render-panel (s)
   "Write suggestion S's panel text into the panel buffer."
-  (let ((buf (get-buffer-create notelinks--panel-buffer-name)))
+  (let ((src (current-buffer))
+        (buf (get-buffer-create notelinks--panel-buffer-name)))
     (with-current-buffer buf
+      (unless (derived-mode-p 'notelinks-panel-mode) (notelinks-panel-mode))
+      (setq notelinks--panel-source src)
       (let ((inhibit-read-only t))
         (erase-buffer)
         (insert (notelinks--panel-text s))
         (goto-char (point-min)))
-      (setq buffer-read-only t)
       (setq-local mode-line-format nil))
     buf))
 

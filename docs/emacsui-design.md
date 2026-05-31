@@ -91,6 +91,9 @@ the working buffer.
   changes. Off a suggestion it shows a hint plus the legend.
 - Each overlay also keeps a `help-echo` function (same content) for the mouse
   tooltip — that never opens a window, so it stays.
+- The panel buffer uses a small `notelinks-panel-mode`; pressing **`q`** there
+  closes the panel and **quits the review** (in its source buffer), so the panel
+  is also a valid exit point.
 
 ## 5. Navigation order
 

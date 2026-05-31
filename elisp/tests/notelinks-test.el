@@ -207,6 +207,32 @@ ENV is an already-built envelope alist.  `content' is bound for BODY."
       (should (string-match-p "move onto" txt))
       (should (string-match-p "q quit" txt)))))
 
+(ert-deftest notelinks-test-panel-q-bound ()
+  (should (eq 'notelinks-panel-quit (lookup-key notelinks-panel-mode-map "q"))))
+
+(ert-deftest notelinks-test-panel-q-quits-review ()
+  "Pressing q in the panel ends the review and kills the panel buffer."
+  (let ((content (notelinks-test--read "epistemic_uncertainty.org"))
+        (env (notelinks-test--fixture-env)))
+    (with-temp-buffer
+      (insert content)
+      (org-mode)
+      (let ((src (current-buffer)))
+        (cl-letf (((symbol-function 'notelinks--report) (lambda (&rest _) nil))
+                  ;; avoid batch windowing fragility; panel buffer is still made
+                  ((symbol-function 'display-buffer-in-side-window) (lambda (&rest _) nil)))
+          (notelinks--on-result src env))
+        (should notelinks--suggestions)
+        (let ((panel (get-buffer notelinks--panel-buffer-name)))
+          (should (buffer-live-p panel))
+          (with-current-buffer panel
+            (should (eq notelinks--panel-source src))
+            (should (derived-mode-p 'notelinks-panel-mode))
+            (notelinks-panel-quit))
+          (should-not (buffer-live-p panel)))          ; panel killed
+        (should-not notelinks--suggestions)            ; review ended
+        (should-not notelinks-review-mode)))))
+
 ;;;; HTTP backend
 
 (ert-deftest notelinks-test-http-body-extracts-decoded-body ()
