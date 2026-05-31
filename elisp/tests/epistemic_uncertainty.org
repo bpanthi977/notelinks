@@ -1,0 +1,83 @@
+:PROPERTIES:
+:ID:       9B467507-39E7-4F55-B03F-AD53694DBCFE
+:END:
+#+title: Epistemic Uncertainty
+#+date:<2026-05-01 Fri>
+
+/Epistemic Status: These are notes at early stage of learning. I am
+not 100% sure about everything written here./
+
+Epistemic Uncertainty is the [[id:8f5b373b-c705-48b3-a425-308cc4d853a1][uncertainty]] due to lack of knowledge.
+
+The most rigorous framework for epistemic uncertainty is [[id:734D6D9F-7103-425E-97C9-94F8EA8AF1A1][Bayesian
+inference]].
+
+Here we maintain a distribution over parameters, $p(\theta | D)$. This
+is the posterior, i.e. what are the possible world models after seing
+the data.
+
+In the context of [[id:B010228E-5555-4D07-8E63-B54E476A249E][Reinforcement Learning]], the prediction then for a
+new transition is:
+
+\begin{align*}
+p(s_{t+1} | s_{t}, a_t, D) = \int p(s_{t+1} | s_t, a_t, \theta) \cdot p(\theta| D) \mathrm{d}\theta
+\end{align*}
+
+Epistemic uncertainty is now the variance of this quantity with
+respsect to $\theta$:
+
+\begin{align*}
+\mathrm{epistemic} = \mathrm{Var}_{\theta \sim p(\theta|D)} \left[ \mathbb E \left[ s_{t+1} | s_t, a_t, \theta \right] \right]
+\end{align*}
+
+while Aleatoric Uncertainty is the expected variance $\mathbb E_{\theta} \left [ Var_{\theta} [ s_{t+1}] \right]$.
+
+We know the problem with Bayesian inference is that, it is
+computationally intractable. Some approaches can approximate it.
+
+1. Variational Inference: Take a simpler $q(\theta)$
+
+   Typically a factored Gaussian over parameters. This leads to
+   Bayesian Neural Networks (BNN) but this is poor approximation with
+   the assumption of factored representation being not so great.
+
+   Using a normalizing flow to represent $q(\theta)$ give a flexible,
+   expressive distribution that is more expressive than BNN.
+
+2. Laplace approximation: Approximate the gaussain centered around a
+   point estimate model $\theta^{\star}$, with a hessian capturing local curvature:
+
+   \begin{align*}
+   p(\theta | D)  \approx \mathcal{N} (\theta^{\star}, H^{-1})
+   \end{align*}
+
+   But hessian gets very large. Instead we can do *last-layer Laplace*
+   approach where the previous layers taken as just a fixed feature
+   extractor.
+
+   TODO: Can we do Kalman filter like approach where previous layers
+   are taken as fixed feature extractor and the last layer is a linear
+   tranform fitted using kalman filters? This approach might have
+   principled solutions.
+
+3. Gaussian Process: Most flexible and principled but scaled $O(N^3)$
+   with number of observations. [Note: I am note sure about this. Have
+   to verify]
+
+---
+
+The above forumation works when the state is numeric. The correct
+general forumation that works for any kind of data is mutual
+information between prediction and the model parameters:
+
+\begin{align*}
+\mathrm{epistemic} &= I(s_{t+1}; \theta | s_t, a_t, D) \\
+&= H(\mathbb E_{\theta} \left[ p(s_{t+1} | s_t, a_t, \theta) \right]) - \mathbb E_{\theta} \left[ H( p(s_{t+1} | s_t, a_t, \theta)) \right]
+\end{align*}
+
+The first time is entropy of the mixture (how uncertain the overall
+prediction is when averaged over all models), and the second term is
+average entropy of the individual models (how uncertain is each model
+on its own)
+
+---

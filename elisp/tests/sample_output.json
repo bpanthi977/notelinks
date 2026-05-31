@@ -1,0 +1,136 @@
+{
+  "version": 1,
+  "source": {
+    "file": "notes/epistemic_uncertainty.org",
+    "title": "Epistemic Uncertainty",
+    "id": "9B467507-39E7-4F55-B03F-AD53694DBCFE",
+    "queried_at": "2026-05-31T09:00:00Z",
+    "content_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "suggestions": [
+    {
+      "id": "s01",
+      "type": "analogous-mechanism",
+      "confidence": 5,
+      "why": "The note's epistemic = H(model-averaged prediction) - E_theta[H(per-model prediction)] is exactly the mutual-information identity I(X;Y) = H(X) - H(X|Y) defined in the target. Same decomposition, different notation.",
+      "source_chunk": {
+        "text": "The first time is entropy of the mixture (how uncertain the overall prediction is when averaged over all models), and the second term is average entropy of the individual models (how uncertain is each model on its own)",
+        "heading": null,
+        "char_start": 2970,
+        "char_end": 3188
+      },
+      "target_excerpt": "I(X;Y) = H(X) + H(Y) - H(X,Y);  I(X;Y) = H(X) - H(X|Y). Mutual information is also not dependent on the units and is non zero.",
+      "target": {
+        "file": "notes/entropy.org",
+        "title": "Entropy",
+        "file_id": "40628C21-A838-45DA-836C-2FA6E9F3B4E6",
+        "heading": {
+          "text": "Differential Entropy",
+          "id": "6398DC98-3FD0-45B5-B2CA-E0D8E81F5583",
+          "level": 1
+        }
+      },
+      "source_anchor": {
+        "char_start": 3188,
+        "char_end": 3188,
+        "expect": "",
+        "before": "how uncertain is each model\non its own)\n",
+        "after": "\n---\n",
+        "template": "\nThis decomposition is the {{link}} between the prediction and the parameters: entropy of the model-averaged prediction minus the average per-model entropy.\n",
+        "link_description": "Mutual Information"
+      }
+    },
+    {
+      "id": "s02",
+      "type": "analogous-mechanism",
+      "confidence": 4,
+      "why": "Laplace approximation picks a Gaussian as the local model of the posterior; the target shows the Gaussian is the maximum-entropy distribution for a given mean and variance - the least-committal choice, which is why it is the natural approximating family.",
+      "source_chunk": {
+        "text": "Laplace approximation: Approximate the gaussain centered around a point estimate model theta*, with a hessian capturing local curvature",
+        "heading": null,
+        "char_start": 1761,
+        "char_end": 1980
+      },
+      "target_excerpt": "the gaussian distribution maximizes the entropy ... H[x] = 1/2 ( 1 + ln 2 pi sigma^2 ). (ROAM alias: Gaussian maximizes entropy for a given mean and variance.)",
+      "target": {
+        "file": "notes/entropy.org",
+        "title": "Entropy",
+        "file_id": "40628C21-A838-45DA-836C-2FA6E9F3B4E6",
+        "heading": {
+          "text": "Maximum Entropy",
+          "id": "9E185F19-501A-4C4C-BD7B-8D57105C70AE",
+          "level": 2
+        }
+      },
+      "source_anchor": {
+        "char_start": 1800,
+        "char_end": 1808,
+        "expect": "gaussain",
+        "before": " Laplace approximation: Approximate the ",
+        "after": " centered around a\n   point estimate mod",
+        "template": "{{link}}",
+        "link_description": "gaussain"
+      }
+    },
+    {
+      "id": "s03",
+      "type": "mention",
+      "confidence": 3,
+      "why": "The phrase names the entropy of a mixture distribution; links the bare term to the canonical Entropy note for definition.",
+      "source_chunk": {
+        "text": "The first time is entropy of the mixture (how uncertain the overall prediction is when averaged over all models)",
+        "heading": null,
+        "char_start": 2970,
+        "char_end": 3081
+      },
+      "target_excerpt": "Average amount of information that you get from a message. Entropy of a discrete random variable X ... H(X) = - sum_i p_i log p_i.",
+      "target": {
+        "file": "notes/entropy.org",
+        "title": "Entropy",
+        "file_id": "40628C21-A838-45DA-836C-2FA6E9F3B4E6",
+        "heading": null
+      },
+      "source_anchor": {
+        "char_start": 2987,
+        "char_end": 3009,
+        "expect": "entropy of the mixture",
+        "before": "\\right]\n\\end{align*}\n\nThe first time is ",
+        "after": " (how uncertain the overall\nprediction i",
+        "template": "{{link}}",
+        "link_description": "entropy of the mixture"
+      }
+    },
+    {
+      "id": "s04",
+      "type": "analogous-mechanism",
+      "confidence": 3,
+      "why": "Averaging the prediction over the posterior ensemble of models mirrors a macrostate as an ensemble over microstates - uncertainty as an average over a population of configurations.",
+      "source_chunk": {
+        "text": "the overall prediction is when averaged over all models",
+        "heading": null,
+        "char_start": 3026,
+        "char_end": 3081
+      },
+      "target_excerpt": "the arrangement of objects in the bins is called a microstate and overall distribution n_i/N is called macrostate ... S = k ln W, W is the number of possible microstates in a macrostate.",
+      "target": {
+        "file": "notes/entropy.org",
+        "title": "Entropy",
+        "file_id": "40628C21-A838-45DA-836C-2FA6E9F3B4E6",
+        "heading": {
+          "text": "Statistical Mechanics",
+          "id": null,
+          "level": 1
+        }
+      },
+      "source_anchor": {
+        "char_start": 3056,
+        "char_end": 3080,
+        "expect": "averaged over all models",
+        "before": "ncertain the overall\nprediction is when ",
+        "after": "), and the second term is\naverage entrop",
+        "template": "{{link}}",
+        "link_description": "averaged over all models"
+      }
+    }
+  ]
+}
