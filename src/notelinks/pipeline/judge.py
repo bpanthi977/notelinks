@@ -25,6 +25,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING
 
+from notelinks import observability
 from notelinks.models import (
     JudgeAnchor,
     JudgeResponse,
@@ -336,20 +337,29 @@ def judge_candidates(
 
     def _call(sid: str) -> JudgeResponse:
         source_chunk = source_by_id[sid]
-        messages = _build_messages(note, source_chunk, groups[sid], store)
-        started = time.perf_counter()
-        response = llm.complete_structured(
-            messages, settings, JudgeResponse, client=client
-        )
-        assert isinstance(response, JudgeResponse)  # narrow for type-checkers
-        logger.debug(
-            "judge: group %s (%d targets) -> %d suggestions in %.2fs",
-            sid,
-            len(groups[sid]),
-            len(response.suggestions),
-            time.perf_counter() - started,
-        )
-        return response
+        # A per-group span (no-op unless tracing): created INSIDE the worker
+        # thread under the propagated context, so the group's OpenAI auto-span
+        # nests under the suggest root trace rather than splitting off.
+        with observability.judge_span(sid):
+            messages = _build_messages(note, source_chunk, groups[sid], store)
+            started = time.perf_counter()
+            response = llm.complete_structured(
+                messages, settings, JudgeResponse, client=client
+            )
+            assert isinstance(response, JudgeResponse)  # narrow for type-checkers
+            logger.debug(
+                "judge: group %s (%d targets) -> %d suggestions in %.2fs",
+                sid,
+                len(groups[sid]),
+                len(response.suggestions),
+                time.perf_counter() - started,
+            )
+            return response
+
+    # OTel context is contextvars-based and does NOT propagate into worker
+    # threads, so capture the current context here (no-op/None when tracing off)
+    # and replay it inside each worker — so worker spans nest under the root.
+    parent_ctx = observability.current_context()
 
     # Parallel I/O: one LLM call per source chunk. Results are collected keyed by
     # sid so the order in which calls *finish* never affects the output.
@@ -357,7 +367,10 @@ def judge_candidates(
     if ordered_sids:
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             future_to_sid = {
-                executor.submit(_call, sid): sid for sid in ordered_sids
+                executor.submit(
+                    observability.context_propagating_wrapper(_call, parent_ctx), sid
+                ): sid
+                for sid in ordered_sids
             }
             for future, sid in future_to_sid.items():
                 try:

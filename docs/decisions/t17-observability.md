@@ -101,6 +101,70 @@ invisible. `engine.suggest` wraps `retrieve_candidates` in
 `pipeline/retrieve.py` stays **pure** (no otel import); the span lives entirely
 in `engine.py` via the helper.
 
+### Unified trace (root span + thread context propagation)
+
+**The problem.** `OpenAIInstrumentor` auto-instruments every embedding + judge
+OpenAI-SDK call, and `engine.suggest` opens a manual `retrieve_candidates`
+RETRIEVER span. But there was **no root span**, so OTel — which derives a span's
+trace from the *current span* — made each auto-instrumented call (and the
+retrieval span) its **own top-level trace**. One `suggest` run therefore
+scattered into many disconnected traces in Phoenix. Worse, the judge runs its
+per-source-chunk LLM calls in a `concurrent.futures.ThreadPoolExecutor` (the T12
+parallelization), and the OTel "current span" lives in a `contextvars` context,
+which **does not propagate into worker threads** — so even with a root span the
+parallel judge spans (and the OpenAI auto-spans they create) would split off into
+their own traces.
+
+**The root span.** `observability.root_span(name, attributes=None)` is a context
+manager — same shape/guard as `retrieval_span` — that starts a span as the
+**current** span when tracing is active and is a **safe no-op (imports zero
+otel)** when `_TRACER is None`. `engine.suggest` wraps the whole pipeline body in
+`with observability.root_span("notelinks.suggest", {note id/title}):`. So the
+query-embedding OpenAI auto-span (same thread) and the existing `retrieval_span`
+now nest under it and share one `trace_id` — one connected tree per `suggest`
+run. (The auto-refresh in step 1 is left OUTSIDE the root: it is its own concern
+and its embedding traffic should not nest under this `suggest`.)
+
+**Crossing the thread boundary.** Two helpers carry the OTel context into the
+judge's worker threads, both no-ops importing zero otel when tracing is off:
+
+- `current_context()` → captures the current `opentelemetry.context` on the
+  submitting thread (or `None` when inactive).
+- `context_propagating_wrapper(fn, ctx)` → when `ctx`/`_TRACER` is `None`, the
+  **identity wrapper** (returns `fn` unchanged, imports no otel); otherwise wraps
+  `fn` so that *inside the worker thread* it `context.attach(ctx)` … runs `fn` …
+  `context.detach(token)`, so any span `fn` creates nests under the captured
+  context's span (the root).
+
+`judge_candidates` captures the context once before submitting and wraps each
+`_call` task with it. Behaviour is **unchanged**: the wrapper only attaches/detaches
+context around the existing call; the same `_call` runs, results are still keyed
+by `sid` and assembled sequentially in first-seen group order, so the stable
+`s01`/`s02`/… ids, failure isolation, and returned list are identical.
+
+**The per-judge-group span.** Inside `_call` (i.e. in the worker thread, under
+the propagated context) we open `observability.judge_span(source_chunk_id)`
+(a no-op when off) around the message build + LLM call. It both enriches the
+trace (a named node per source chunk around its OpenAI auto-span) **and** makes
+propagation observable/testable — its `trace_id` must equal the root's, which it
+only can if the context crossed the thread boundary.
+
+**Testing it offline.** The auto OpenAI spans need real network calls, so they
+are out of scope for the offline suite; the manual judge-group spans created in
+the workers are the **proxy** that proves thread propagation. The trace-tree test
+(`test_integration.py::test_suggest_emits_one_unified_trace`, skipped via
+`pytest.importorskip` when the extra is absent) stands up a **LOCAL**
+`TracerProvider` with an `InMemorySpanExporter` + `SimpleSpanProcessor` (NOT the
+Phoenix OTLP exporter — there is no running collector), points
+`observability._TRACER` at it, and runs `Engine.suggest` with `embed_texts` /
+`complete_structured` monkeypatched (no network, no key). It asserts the root
+`notelinks.suggest` span, the `retrieve_candidates` span, and EVERY
+`judge_source_chunk` span (created in worker threads) all share the **same
+`trace_id`** — proving the root span + cross-thread context propagation work. The
+no-op paths get their own unit tests in `test_observability.py` that force any
+`opentelemetry`/`phoenix`/`openinference` import to fail, proving the inactive
+helpers import zero otel.
+
 ## stdout-purity guarantee
 
 `suggest` emits only the `Envelope` JSON; `index` emits only the stats JSON.

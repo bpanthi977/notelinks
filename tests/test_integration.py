@@ -562,3 +562,110 @@ def test_top_n_cap_is_respected(env, monkeypatch):
     # The two highest-confidence survived, in order, renumbered s01/s02.
     assert [s.confidence for s in envelope.suggestions] == [5, 4]
     assert [s.id for s in envelope.suggestions] == ["s01", "s02"]
+
+
+# ---------------------------------------------------------------------------
+# Scenario 4: unified trace — root span + cross-thread context propagation.
+#
+# Proves T17's "one trace per suggest run" goal OFFLINE: a LOCAL otel
+# TracerProvider with an InMemorySpanExporter (NOT the Phoenix OTLP exporter — no
+# collector is running) is pointed at by ``observability._TRACER``, then a real
+# ``Engine.suggest`` runs with the two provider boundaries monkeypatched. We then
+# assert the manual spans we create — the root ``notelinks.suggest``, the
+# ``retrieve_candidates`` RETRIEVER span (same thread), and EVERY
+# ``judge_source_chunk`` span (created INSIDE ThreadPoolExecutor worker threads) —
+# all share the root's ``trace_id``. The judge-group spans nesting under the root
+# is the proxy that proves contextvars-based otel context was propagated across
+# threads (the auto OpenAI spans need real calls, so they are out of scope here).
+# ---------------------------------------------------------------------------
+
+
+def test_suggest_emits_one_unified_trace(env, monkeypatch):
+    # Skip cleanly when the optional ``trace`` extra is absent. The active trace
+    # path (retrieval_span) lazily imports openinference.semconv, so require it
+    # too — otherwise the test would fail rather than skip with a partial install.
+    pytest.importorskip("opentelemetry.sdk.trace")
+    pytest.importorskip("openinference.semconv.trace")
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
+        InMemorySpanExporter,
+    )
+
+    from notelinks import observability
+
+    corpus_dir, settings, spy = env
+
+    # Local, in-memory tracer — no network, no Phoenix collector.
+    exporter = InMemorySpanExporter()
+    provider = TracerProvider()
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+    # Point the module tracer at our local provider (the autouse fixture in
+    # test_observability resets _TRACER; here we set+restore around this test).
+    saved_tracer = observability._TRACER
+    observability._TRACER = provider.get_tracer("notelinks-test")
+
+    # Judge accepts the immune target, anchoring on a verbatim buffer span.
+    def fake_complete_structured(messages, settings_, response_model, *, client=None):
+        suffix = messages[-1]["content"][-1]["text"]
+        target_id = None
+        for line in suffix.splitlines():
+            if line.startswith("target_chunk_id:"):
+                cid = line.split(":", 1)[1].strip()
+                if cid.startswith("uuid-immune"):
+                    target_id = cid
+                    break
+                target_id = target_id or cid
+        return JudgeResponse(
+            suggestions=[
+                RawJudgeSuggestion(
+                    target_chunk_id=target_id,
+                    type="analogous-mechanism",
+                    confidence=4,
+                    why="Both cast mismatch-correction as the driver of updating.",
+                    anchor=JudgeAnchor(mode="wrap", expect="propagates corrections"),
+                    target_is_note=False,
+                )
+            ]
+        )
+
+    monkeypatch.setattr(llm, "complete_structured", fake_complete_structured)
+
+    try:
+        engine = Engine(settings)
+        envelope = engine.suggest(ACTIVE)
+    finally:
+        observability._TRACER = saved_tracer
+
+    # The run still produced real output (behaviour unchanged by tracing).
+    assert isinstance(envelope, Envelope)
+    assert envelope.suggestions
+
+    spans = exporter.get_finished_spans()
+    by_name: dict[str, list] = {}
+    for s in spans:
+        by_name.setdefault(s.name, []).append(s)
+
+    # The three manual span kinds are present.
+    assert len(by_name.get("notelinks.suggest", [])) == 1, "exactly one root span"
+    assert by_name.get("retrieve_candidates"), "retrieval span recorded"
+    judge_spans = by_name.get("judge_source_chunk", [])
+    assert judge_spans, "at least one per-source-chunk judge span (in a worker thread)"
+
+    root = by_name["notelinks.suggest"][0]
+    root_trace_id = root.context.trace_id
+
+    # Root span carries the note id/title attributes the engine passed.
+    assert root.attributes["notelinks.note_id"] == "uuid-active"
+    assert root.attributes["notelinks.note_title"] == "Active Inference"
+
+    # The retrieval span (same thread) shares the root trace.
+    for s in by_name["retrieve_candidates"]:
+        assert s.context.trace_id == root_trace_id
+
+    # ALL judge-group spans — created inside ThreadPoolExecutor workers — share the
+    # SAME trace_id as the root: proof the otel context crossed thread boundaries.
+    for s in judge_spans:
+        assert s.context.trace_id == root_trace_id, (
+            "judge span split into its own trace — thread context not propagated"
+        )

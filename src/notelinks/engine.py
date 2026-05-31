@@ -126,73 +126,87 @@ class Engine:
             )
 
         # 1. Auto-refresh the corpus (incremental; cheap when nothing changed).
+        #    Done OUTSIDE the per-run root span: refresh is its own concern and
+        #    its (optional) embedding traffic should not nest under this suggest.
         self.refresh()
 
         # 2. Parse the buffer. No file path is taken as input — the note is
         #    identified by its own :ID: (uuid), which also drives self-exclusion.
         note = parse_note(buffer_text)
 
-        # 3. Query chunks come from the buffer (unsaved edits count).
-        source_chunks = chunk_note(note, self.settings)
-        source_embeddings = embed_texts(
-            [c.embed_text for c in source_chunks],
-            self.settings,
-            client=self.embedding_client,
-        )
-        logger.info(
-            "suggest: note=%s (%r) chunked into %d source chunks",
-            note.id,
-            note.title,
-            len(source_chunks),
-        )
-
-        # 4. Already-linked targets are never re-suggested.
-        exclude_target_uuids = [link.target_uuid for link in note.links]
-
-        # Retrieval wrapped in a (no-op-unless-traced) RETRIEVER span so the
-        # vector-search step shows in the same Phoenix trace as the judge calls.
-        with observability.retrieval_span(note.title) as span:
-            candidates = retrieve_candidates(
-                self.store,
-                source_chunks,
-                source_embeddings,
-                settings=self.settings,
-                current_note_uuid=note.id,
-                exclude_target_uuids=exclude_target_uuids,
+        # The whole pipeline body runs under a single (no-op-unless-traced) ROOT
+        # span, so the query-embedding OpenAI auto-span (same thread), the
+        # retrieval span, and ALL parallel judge spans share one trace_id —
+        # forming one connected tree in Phoenix per suggest run instead of many
+        # disconnected top-level traces.
+        with observability.root_span(
+            "notelinks.suggest",
+            {"notelinks.note_id": note.id, "notelinks.note_title": note.title},
+        ):
+            # 3. Query chunks come from the buffer (unsaved edits count).
+            source_chunks = chunk_note(note, self.settings)
+            source_embeddings = embed_texts(
+                [c.embed_text for c in source_chunks],
+                self.settings,
+                client=self.embedding_client,
             )
-            span.record_candidates(candidates)
-        logger.info(
-            "suggest: retrieved %d candidates (excluding %d already-linked targets)",
-            len(candidates),
-            len(exclude_target_uuids),
-        )
+            logger.info(
+                "suggest: note=%s (%r) chunked into %d source chunks",
+                note.id,
+                note.title,
+                len(source_chunks),
+            )
 
-        # 5. Judge → raw suggestions.
-        raw_suggestions = judge_candidates(
-            candidates, note, self.store, self.settings, client=self.judge_client
-        )
-        logger.info("suggest: judge returned %d raw suggestions", len(raw_suggestions))
+            # 4. Already-linked targets are never re-suggested.
+            exclude_target_uuids = [link.target_uuid for link in note.links]
 
-        # 6. Rank / dedup / cap / invariants.
-        suggestions = self._finalize(
-            raw_suggestions,
-            note_id=note.id,
-            exclude_target_uuids=set(exclude_target_uuids),
-        )
-        logger.info(
-            "suggest: %d final suggestions after dedup/cap (top_n=%d)",
-            len(suggestions),
-            self.settings.top_n,
-        )
+            # Retrieval wrapped in a (no-op-unless-traced) RETRIEVER span so the
+            # vector-search step shows in the same Phoenix trace as the judge calls.
+            with observability.retrieval_span(note.title) as span:
+                candidates = retrieve_candidates(
+                    self.store,
+                    source_chunks,
+                    source_embeddings,
+                    settings=self.settings,
+                    current_note_uuid=note.id,
+                    exclude_target_uuids=exclude_target_uuids,
+                )
+                span.record_candidates(candidates)
+            logger.info(
+                "suggest: retrieved %d candidates (excluding %d already-linked targets)",
+                len(candidates),
+                len(exclude_target_uuids),
+            )
 
-        # 7. Build the envelope.
-        source = Source(
-            title=note.title,
-            id=note.id,
-            queried_at=datetime.now(UTC).isoformat(),
-            content_hash="sha256:" + hashlib.sha256(buffer_text.encode("utf-8")).hexdigest(),
-        )
-        return Envelope(version=_ENVELOPE_VERSION, source=source, suggestions=suggestions)
+            # 5. Judge → raw suggestions.
+            raw_suggestions = judge_candidates(
+                candidates, note, self.store, self.settings, client=self.judge_client
+            )
+            logger.info("suggest: judge returned %d raw suggestions", len(raw_suggestions))
+
+            # 6. Rank / dedup / cap / invariants.
+            suggestions = self._finalize(
+                raw_suggestions,
+                note_id=note.id,
+                exclude_target_uuids=set(exclude_target_uuids),
+            )
+            logger.info(
+                "suggest: %d final suggestions after dedup/cap (top_n=%d)",
+                len(suggestions),
+                self.settings.top_n,
+            )
+
+            # 7. Build the envelope.
+            source = Source(
+                title=note.title,
+                id=note.id,
+                queried_at=datetime.now(UTC).isoformat(),
+                content_hash="sha256:"
+                + hashlib.sha256(buffer_text.encode("utf-8")).hexdigest(),
+            )
+            return Envelope(
+                version=_ENVELOPE_VERSION, source=source, suggestions=suggestions
+            )
 
     # -- helpers -----------------------------------------------------------
 

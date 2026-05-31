@@ -149,3 +149,67 @@ def test_tracing_endpoint_default_and_env(monkeypatch):
     assert observability.tracing_endpoint("http://x:1234") == "http://x:1234"
     monkeypatch.setenv("PHOENIX_COLLECTOR_ENDPOINT", "http://env:9999")
     assert observability.tracing_endpoint() == "http://env:9999"
+
+
+# ---------------------------------------------------------------------------
+# Unified-trace helpers: root_span / context propagation / judge_span no-ops.
+# These must be safe no-ops AND import zero otel when tracing was never set up.
+# ---------------------------------------------------------------------------
+
+
+def _block_otel_imports(monkeypatch):
+    """Force any import of opentelemetry/phoenix/openinference to fail.
+
+    Lets a test prove the no-op paths import NO otel: if a helper tried to import
+    it on the inactive path, the import would raise and the test would fail.
+    """
+    real_import = builtins.__import__
+
+    def _fake_import(name, *args, **kwargs):
+        if (
+            name.startswith("opentelemetry")
+            or name.startswith("phoenix")
+            or name.startswith("openinference")
+        ):
+            raise ImportError(f"blocked import of {name!r}")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", _fake_import)
+
+
+def test_root_span_is_noop_when_tracing_not_setup(monkeypatch):
+    assert observability._TRACER is None
+    _block_otel_imports(monkeypatch)
+    # Yields None, records the attributes safely, imports no otel.
+    with observability.root_span("notelinks.suggest", {"notelinks.note_id": "X"}) as span:
+        assert span is None
+    # No attributes / None-attributes variant also fine.
+    with observability.root_span("notelinks.suggest") as span:
+        assert span is None
+    assert observability._TRACER is None
+
+
+def test_current_context_is_none_when_tracing_off(monkeypatch):
+    assert observability._TRACER is None
+    _block_otel_imports(monkeypatch)
+    assert observability.current_context() is None
+
+
+def test_context_propagating_wrapper_is_identity_when_off(monkeypatch):
+    assert observability._TRACER is None
+    _block_otel_imports(monkeypatch)
+
+    def fn(a, b):
+        return a + b
+
+    # ctx is None (tracing off) => returns fn UNCHANGED (identity), no otel import.
+    wrapped = observability.context_propagating_wrapper(fn, None)
+    assert wrapped is fn
+    assert wrapped(2, 3) == 5
+
+
+def test_judge_span_is_noop_when_tracing_off(monkeypatch):
+    assert observability._TRACER is None
+    _block_otel_imports(monkeypatch)
+    with observability.judge_span("SRC-UUID:0") as span:
+        assert span is None

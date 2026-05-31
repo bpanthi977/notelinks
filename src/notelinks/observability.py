@@ -31,7 +31,7 @@ import contextlib
 import logging
 import os
 import sys
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -209,6 +209,100 @@ class _RetrievalSpan:
             self._span.set_attribute(
                 f"{prefix}.{i}.{DocumentAttributes.DOCUMENT_SCORE}", cand.score
             )
+
+
+@contextlib.contextmanager
+def root_span(name: str, attributes: dict[str, Any] | None = None) -> Iterator[Any]:
+    """The per-``suggest``-run ROOT span — a no-op when tracing is off.
+
+    Started as the **current** span so every span opened underneath it in the
+    same thread (the query-embedding OpenAI auto-span, :func:`retrieval_span`)
+    nests under it and shares one ``trace_id`` — one connected tree in Phoenix
+    per :meth:`Engine.suggest` run, instead of each auto-instrumented call
+    becoming its own disconnected top-level trace.
+
+    When :func:`setup_tracing` has not run (``_TRACER is None``, e.g. the extra
+    is absent or ``--trace`` was not passed) this yields ``None`` and **imports
+    nothing** from otel — same guard/shape as :func:`retrieval_span`, so the
+    engine keeps zero hard dependency on otel.
+    """
+    if _TRACER is None:
+        yield None
+        return
+
+    with _TRACER.start_as_current_span(name) as span:
+        if attributes:
+            for key, value in attributes.items():
+                if value is not None:
+                    span.set_attribute(key, value)
+        yield span
+
+
+def current_context() -> Any:
+    """Capture the current OTel context to carry across threads (else ``None``).
+
+    The OpenTelemetry "current span" lives in a :mod:`contextvars` context, which
+    does **not** propagate into :class:`~concurrent.futures.ThreadPoolExecutor`
+    worker threads. The judge captures this on the submitting thread and replays
+    it inside each worker (via :func:`context_propagating_wrapper`) so worker
+    spans nest under the root rather than splitting off into their own traces.
+
+    No-op when tracing is off: returns ``None`` and imports no otel.
+    """
+    if _TRACER is None:
+        return None
+    from opentelemetry import context as otel_context
+
+    return otel_context.get_current()
+
+
+def context_propagating_wrapper[T](
+    fn: Callable[..., T], ctx: Any
+) -> Callable[..., T]:
+    """Wrap ``fn`` so it runs with ``ctx`` attached (for cross-thread nesting).
+
+    Given a context captured by :func:`current_context` on the submitting thread,
+    return a callable that — inside the worker thread — attaches ``ctx`` as the
+    current context, runs ``fn``, then detaches it, so any span ``fn`` creates
+    nests under that context's span (the root).
+
+    When tracing is off (``ctx is None`` or ``_TRACER is None``) this is the
+    **identity wrapper**: it returns ``fn`` unchanged and imports no otel.
+    """
+    if _TRACER is None or ctx is None:
+        return fn
+
+    from opentelemetry import context as otel_context
+
+    def _wrapped(*args: Any, **kwargs: Any) -> T:
+        token = otel_context.attach(ctx)
+        try:
+            return fn(*args, **kwargs)
+        finally:
+            otel_context.detach(token)
+
+    return _wrapped
+
+
+@contextlib.contextmanager
+def judge_span(source_chunk_id: str) -> Iterator[Any]:
+    """A span per judge group (one per source chunk) — a no-op when tracing off.
+
+    Created **inside** the worker thread under the context propagated by
+    :func:`context_propagating_wrapper`, so it nests under the root span. This
+    both enriches the trace (a named node per source-chunk judge group around
+    its OpenAI auto-span) and makes thread-context propagation observable/testable
+    (its ``trace_id`` must equal the root's).
+
+    Yields ``None`` and imports no otel when tracing was never set up.
+    """
+    if _TRACER is None:
+        yield None
+        return
+
+    with _TRACER.start_as_current_span("judge_source_chunk") as span:
+        span.set_attribute("notelinks.source_chunk_id", source_chunk_id)
+        yield span
 
 
 def _reset_tracing_for_tests() -> None:
