@@ -116,11 +116,12 @@ lower-confidence one (reported as discarded, §9).
 - **No special initial-build path.** `suggest` auto-refreshes the corpus; the
   first ever run is simply slower and is covered by the same spinner. (No
   separate "index" command in the UI.)
-- **File argument:** pass the repo-relative path **only when** the buffer visits
-  a file under the corpus (for `source.file` + self/cyclic exclusion); **omit**
-  for unsaved / new buffers. The note's `:ID:` is parsed by the engine from the
-  stdin buffer. This depends on the engine change in
-  [`task-take-stdin-input.md`](./task-take-stdin-input.md).
+- **No file argument.** `suggest` is invoked with the buffer on stdin only; the
+  engine parses the note's `:ID:` (identity + self/cyclic exclusion) from the
+  stdin buffer. This makes **unsaved / new buffers** work without a file on
+  disk. (The engine change tracked in
+  [`task-take-stdin-input.md`](./task-take-stdin-input.md) has landed —
+  `source.file` is gone from the contract and the CLI takes no path arg.)
 - **Configuration:**
   - `notelinks-command` — list, default `("notelinks")`; e.g. set to
     `("uv" "run" "notelinks")`.

@@ -75,15 +75,6 @@ When nil the engine falls back to its own NOTELINKS_CORPUS_DIR."
   (let ((d (or notelinks-corpus-dir (getenv "NOTELINKS_CORPUS_DIR"))))
     (and d (expand-file-name d))))
 
-(defun notelinks--source-file ()
-  "Return the current note's repo-relative path, or nil.
-nil for unsaved buffers or files outside the corpus; the engine then
-takes the note's identity from the stdin buffer's :ID:."
-  (let ((f (buffer-file-name))
-        (corpus (notelinks--corpus-dir)))
-    (when (and f corpus (file-in-directory-p f corpus))
-      (file-relative-name f corpus))))
-
 (defun notelinks--set-status (buf str)
   (when (buffer-live-p buf)
     (with-current-buffer buf (setq-local mode-line-process str) (force-mode-line-update))))
@@ -102,12 +93,10 @@ takes the note's identity from the stdin buffer's :ID:."
     (user-error "notelinks: a review is already in progress (quit it first)"))
   (let* ((src (current-buffer))
          (text (buffer-substring-no-properties (point-min) (point-max)))
-         (file (notelinks--source-file))
          (corpus (notelinks--corpus-dir))
          (program (car notelinks-command))
          (args (append (cdr notelinks-command)
                        (list "suggest")
-                       (when file (list file))
                        (when corpus (list "--corpus" corpus))))
          (stdout (generate-new-buffer " *notelinks-stdout*"))
          (stderr (generate-new-buffer " *notelinks-stderr*"))
