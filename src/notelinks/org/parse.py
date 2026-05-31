@@ -195,17 +195,20 @@ def _parse_links(text: str) -> list[OrgLink]:
     return links
 
 
-def parse_note(text: str, path: str) -> Note:
+def parse_note(text: str, path: str = "") -> Note:
     """Parse a raw ``.org`` buffer into a :class:`Note`.
 
     Args:
         text: the full note buffer.
-        path: the repo-relative path of the note.
+        path: the repo-relative path of the note. Optional — the current note is
+            parsed from its buffer without a path (it is identified by its
+            ``:ID:``); corpus indexing still passes the on-disk relative path.
+            Used only for ``Note.path`` and the filename→title fallback.
 
     Returns:
         A ``Note`` with file ``id`` (``""`` if no file-level ``:ID:``), ``title``
-        (from ``#+title:``, else derived from the filename), ``aliases``,
-        ``headings``, ``links``, and the raw ``text``.
+        (from ``#+title:``, else derived from the filename when a path is given,
+        else ``""``), ``aliases``, ``headings``, ``links``, and the raw ``text``.
     """
     file_id, aliases = _parse_top_drawer(text)
 

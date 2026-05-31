@@ -115,7 +115,7 @@ def test_index_command_prints_stats(corpus):
 
 def test_suggest_command_emits_envelope_json(corpus):
     result = runner.invoke(
-        app, ["suggest", "active-inference.org", "--corpus", str(corpus)], input=BUFFER
+        app, ["suggest", "--corpus", str(corpus)], input=BUFFER
     )
     assert result.exit_code == 0, result.output
     envelope = json.loads(result.output)

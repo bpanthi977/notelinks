@@ -308,7 +308,7 @@ def test_suggest_end_to_end_happy_path(env, monkeypatch):
     monkeypatch.setattr(llm, "complete_structured", fake_complete_structured)
 
     engine = Engine(settings)
-    envelope = engine.suggest(ACTIVE, "active-inference.org")
+    envelope = engine.suggest(ACTIVE)
 
     # Validates + round-trips against the json-format.md wire shape.
     assert isinstance(envelope, Envelope)
@@ -316,7 +316,7 @@ def test_suggest_end_to_end_happy_path(env, monkeypatch):
     Envelope.model_validate(dumped)
     assert dumped["version"] == 1
     assert dumped["source"]["id"] == "uuid-active"
-    assert dumped["source"]["file"] == "active-inference.org"
+    assert "file" not in dumped["source"]  # source.file was removed
     assert dumped["source"]["content_hash"].startswith("sha256:")
 
     assert envelope.suggestions, "expected at least one surfaced suggestion"
@@ -442,7 +442,7 @@ def test_already_linked_target_is_never_suggested(env, monkeypatch):
     _patch_judge(monkeypatch, raw)
 
     engine = Engine(settings)
-    envelope = engine.suggest(linked_buffer, "active-inference.org")
+    envelope = engine.suggest(linked_buffer)
 
     target_ids = {s.target.file_id for s in envelope.suggestions}
     assert "uuid-immune" not in target_ids  # already-linked exclusion
@@ -472,7 +472,7 @@ def test_self_link_is_never_a_target(env, monkeypatch):
     _patch_judge(monkeypatch, raw)
 
     engine = Engine(settings)
-    envelope = engine.suggest(ACTIVE, "active-inference.org")
+    envelope = engine.suggest(ACTIVE)
 
     target_ids = {s.target.file_id for s in envelope.suggestions}
     assert "uuid-active" not in target_ids  # no self-link
@@ -514,7 +514,7 @@ def test_dedup_keeps_highest_confidence_per_target_and_heading(env, monkeypatch)
     _patch_judge(monkeypatch, raw)
 
     engine = Engine(settings)
-    envelope = engine.suggest(ACTIVE, "active-inference.org")
+    envelope = engine.suggest(ACTIVE)
 
     # Two survivors: one per distinct heading.
     keys = sorted(
@@ -556,7 +556,7 @@ def test_top_n_cap_is_respected(env, monkeypatch):
     _patch_judge(monkeypatch, raw)
 
     engine = Engine(settings)
-    envelope = engine.suggest(ACTIVE, "active-inference.org")
+    envelope = engine.suggest(ACTIVE)
 
     assert len(envelope.suggestions) == 2  # capped to top_n
     # The two highest-confidence survived, in order, renumbered s01/s02.

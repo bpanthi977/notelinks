@@ -255,14 +255,18 @@ file isn't re-hashed on future runs.
 ## 11. Invocation
 
 - **Input:** the current note is provided as **buffer text via stdin** (so it
-  works *while writing*, including unsaved edits); the current-note **file path**
-  is an argument (repo-relative `source.file`, and to read the note's `:ID:`).
+  works *while writing*, including unsaved edits). **No file path is taken** —
+  the note is identified by its own `:ID:` parsed from the buffer, which is also
+  what drives self-exclusion; the frontend already knows which buffer it queried.
   `char_*` offsets are 0-based Unicode codepoints into that buffer. Corpus root
   comes from `NOTELINKS_CORPUS_DIR`, overridable by `--corpus`.
 - `content_hash` = sha256 of the stdin buffer; `queried_at` = current UTC.
+- The envelope's `source` therefore has **no `file`** field — identity is
+  `source.id` (uuid) + `source.title`. (`target.file` is unaffected: it comes
+  from corpus indexing.)
 - **Commands:**
-  - `suggest <file> [--corpus DIR]` (buffer on stdin): incremental refresh of
-    the whole corpus → query the current buffer → emit JSON.
+  - `suggest [--corpus DIR]` (buffer on stdin): incremental refresh of the whole
+    corpus → query the current buffer → emit JSON.
   - `index [--rebuild] [--corpus DIR]`: first/forced full build.
 
 ## 12. Data models & config

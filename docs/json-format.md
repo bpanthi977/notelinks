@@ -69,9 +69,8 @@ keeps async drift small; markers absorb the rest.
 {
   "version": 1,
   "source": {
-    "file": "notes/active-inference.org",   // repo-relative
     "title": "Active Inference",
-    "id": "A1B2-...",                        // org-id of the note (always present)
+    "id": "A1B2-...",                        // org-id of the note (always present); identity + self-exclusion
     "queried_at": "2026-05-30T12:00:00Z",
     "content_hash": "sha256:..."             // of the buffer text at query time
   },
@@ -140,6 +139,6 @@ Then substitute the result for `{{link}}` in `template`.
 
 ## Invariants (engine-enforced, not represented in output)
 
-- No suggestion targets `source.file` (no self-links).
+- No suggestion targets the source note itself (matched by `source.id`, no self-links).
 - No `mention` suggestion whose target the current note already links to.
 - `suggestions` is sorted by `confidence` descending and capped to top-N.

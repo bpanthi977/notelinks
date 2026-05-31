@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import hashlib
 from datetime import UTC, datetime
-from pathlib import Path
 
 from notelinks.config import Settings
 from notelinks.index import build
@@ -73,7 +72,7 @@ class Engine:
             self.store, self.settings, client=self.client, rebuild=rebuild
         )
 
-    def suggest(self, buffer_text: str, file_path: str) -> Envelope:
+    def suggest(self, buffer_text: str) -> Envelope:
         """Run the full pipeline for one note buffer → an :class:`Envelope`.
 
         Flow (design §8–§11):
@@ -97,9 +96,9 @@ class Engine:
         # 1. Auto-refresh the corpus (incremental; cheap when nothing changed).
         self.refresh()
 
-        # 2. Parse the buffer. The path is normalised repo-relative to corpus_dir.
-        rel_path = self._rel_path(file_path)
-        note = parse_note(buffer_text, rel_path)
+        # 2. Parse the buffer. No file path is taken as input — the note is
+        #    identified by its own :ID: (uuid), which also drives self-exclusion.
+        note = parse_note(buffer_text)
 
         # 3. Query chunks come from the buffer (unsaved edits count).
         source_chunks = chunk_note(note, self.settings)
@@ -133,7 +132,6 @@ class Engine:
 
         # 7. Build the envelope.
         source = Source(
-            file=rel_path,
             title=note.title,
             id=note.id,
             queried_at=datetime.now(UTC).isoformat(),
@@ -142,22 +140,6 @@ class Engine:
         return Envelope(version=_ENVELOPE_VERSION, source=source, suggestions=suggestions)
 
     # -- helpers -----------------------------------------------------------
-
-    def _rel_path(self, file_path: str) -> str:
-        """``file_path`` made relative to ``corpus_dir`` (posix), if possible.
-
-        If ``file_path`` is already relative or does not live under the corpus
-        root, it is returned as a plain posix string — the parser only needs it
-        for the filename-title fallback and ``source.file`` display.
-        """
-        assert self.settings.corpus_dir is not None  # guarded by caller
-        path = Path(file_path)
-        root = self.settings.corpus_dir
-        try:
-            return path.resolve().relative_to(root.resolve()).as_posix()
-        except ValueError:
-            # Not under the corpus root (or already relative) — use as-is.
-            return path.as_posix()
 
     def _finalize(
         self,

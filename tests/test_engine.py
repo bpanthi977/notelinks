@@ -11,7 +11,7 @@ two provider boundaries:
   return a canned :class:`JudgeResponse` that points at a real retrieved target
   chunk with an ``expect`` copied verbatim from the buffer.
 
-We then drive ``Engine(settings).suggest(buffer, file)`` end to end and assert
+We then drive ``Engine(settings).suggest(buffer)`` end to end and assert
 the envelope validates, is confidence-sorted, has no self-link, carries target
 COMPONENTS only, and that ``source_anchor`` offsets land on the buffer.
 """
@@ -176,7 +176,7 @@ def test_suggest_end_to_end(env, monkeypatch):
     monkeypatch.setattr(llm, "complete_structured", fake_complete_structured)
 
     engine = Engine(settings)
-    envelope = engine.suggest(BUFFER, "active-inference.org")
+    envelope = engine.suggest(BUFFER)
 
     # Envelope validates and round-trips through the wire schema.
     assert isinstance(envelope, Envelope)
@@ -184,7 +184,7 @@ def test_suggest_end_to_end(env, monkeypatch):
 
     assert envelope.version == 1
     assert envelope.source.id == "uuid-current"
-    assert envelope.source.file == "active-inference.org"
+    assert "file" not in envelope.source.model_dump()  # source.file was removed
     assert envelope.source.content_hash.startswith("sha256:")
 
     assert envelope.suggestions, "expected at least one surfaced suggestion"

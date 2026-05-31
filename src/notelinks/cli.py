@@ -6,8 +6,9 @@ prints JSON. All real work (and all long-lived state) lives in the engine.
 
 Commands (design §11):
 
-* ``suggest <file> [--corpus DIR]`` — buffer on **stdin**: incremental refresh of
-  the whole corpus → query the current buffer → emit the ``Envelope`` JSON.
+* ``suggest [--corpus DIR]`` — buffer on **stdin**: incremental refresh of the
+  whole corpus → query the current buffer → emit the ``Envelope`` JSON. The note
+  is identified by its own ``:ID:`` in the buffer; no file path is taken.
 * ``index [--rebuild] [--corpus DIR]`` — first / forced full build; prints stats.
 
 The corpus root comes from ``NOTELINKS_CORPUS_DIR`` (via ``Settings``),
@@ -30,9 +31,6 @@ app = typer.Typer(help="Suggest idea-resonance links for an org-roam note.")
 
 # Shared option types (Annotated style — keeps the typer.Option call out of the
 # default position, so ruff's B008 false-positive never fires).
-_FileArg = Annotated[
-    str, typer.Argument(help="Path of the current note (repo-relative ok).")
-]
 _CorpusOpt = Annotated[
     Path | None,
     typer.Option("--corpus", help="Corpus root (overrides NOTELINKS_CORPUS_DIR)."),
@@ -51,11 +49,11 @@ def _build_settings(corpus: Path | None) -> Settings:
 
 
 @app.command()
-def suggest(file: _FileArg, corpus: _CorpusOpt = None) -> None:
+def suggest(corpus: _CorpusOpt = None) -> None:
     """Read the note buffer from stdin and print suggestion JSON to stdout."""
     buffer_text = sys.stdin.read()
     settings = _build_settings(corpus)
-    envelope = Engine(settings).suggest(buffer_text, file)
+    envelope = Engine(settings).suggest(buffer_text)
     typer.echo(envelope.model_dump_json(indent=2))
 
 

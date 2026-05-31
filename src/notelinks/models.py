@@ -33,9 +33,13 @@ class ConnectionType(StrEnum):
 
 
 class Source(BaseModel):
-    """``envelope.source`` — identifies the current note (the query)."""
+    """``envelope.source`` — identifies the current note (the query).
 
-    file: str  # repo-relative path
+    Identity is the org-id (``id``); the engine never receives the note's file
+    path (the frontend already knows which buffer it queried), so there is no
+    ``file`` field.
+    """
+
     title: str
     id: str  # org-id of the note (always present)
     queried_at: str  # ISO-8601 UTC timestamp
