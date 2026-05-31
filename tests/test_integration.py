@@ -308,6 +308,7 @@ def test_suggest_end_to_end_happy_path(env, monkeypatch):
     monkeypatch.setattr(llm, "complete_structured", fake_complete_structured)
 
     engine = Engine(settings)
+    engine.refresh()  # suggest() is a pure query now (T19); populate the index first.
     envelope = engine.suggest(ACTIVE)
 
     # Validates + round-trips against the json-format.md wire shape.
@@ -442,6 +443,7 @@ def test_already_linked_target_is_never_suggested(env, monkeypatch):
     _patch_judge(monkeypatch, raw)
 
     engine = Engine(settings)
+    engine.refresh()  # suggest() is a pure query now (T19); populate the index first.
     envelope = engine.suggest(linked_buffer)
 
     target_ids = {s.target.file_id for s in envelope.suggestions}
@@ -472,6 +474,7 @@ def test_self_link_is_never_a_target(env, monkeypatch):
     _patch_judge(monkeypatch, raw)
 
     engine = Engine(settings)
+    engine.refresh()  # suggest() is a pure query now (T19); populate the index first.
     envelope = engine.suggest(ACTIVE)
 
     target_ids = {s.target.file_id for s in envelope.suggestions}
@@ -514,6 +517,7 @@ def test_dedup_keeps_highest_confidence_per_target_and_heading(env, monkeypatch)
     _patch_judge(monkeypatch, raw)
 
     engine = Engine(settings)
+    engine.refresh()  # suggest() is a pure query now (T19); populate the index first.
     envelope = engine.suggest(ACTIVE)
 
     # Two survivors: one per distinct heading.
@@ -556,6 +560,7 @@ def test_top_n_cap_is_respected(env, monkeypatch):
     _patch_judge(monkeypatch, raw)
 
     engine = Engine(settings)
+    engine.refresh()  # suggest() is a pure query now (T19); populate the index first.
     envelope = engine.suggest(ACTIVE)
 
     assert len(envelope.suggestions) == 2  # capped to top_n
@@ -633,6 +638,9 @@ def test_suggest_emits_one_unified_trace(env, monkeypatch):
 
     try:
         engine = Engine(settings)
+        # Refresh OUTSIDE the asserted spans: suggest() is a pure query (T19), so
+        # the single root trace below covers only the query, as the test expects.
+        engine.refresh()
         envelope = engine.suggest(ACTIVE)
     finally:
         observability._TRACER = saved_tracer

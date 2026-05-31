@@ -176,6 +176,9 @@ def test_suggest_end_to_end(env, monkeypatch):
     monkeypatch.setattr(llm, "complete_structured", fake_complete_structured)
 
     engine = Engine(settings)
+    # suggest() is now a pure query (T19): refresh the corpus first so the index
+    # is populated before querying (the CLI/server adapters own freshness).
+    engine.refresh()
     envelope = engine.suggest(BUFFER)
 
     # Envelope validates and round-trips through the wire schema.

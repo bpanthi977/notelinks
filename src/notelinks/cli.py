@@ -53,6 +53,10 @@ _TraceOpt = Annotated[
         "(needs the 'trace' extra + a running `phoenix serve`).",
     ),
 ]
+_HostOpt = Annotated[
+    str, typer.Option("--host", help="Bind address (localhost-only by default).")
+]
+_PortOpt = Annotated[int, typer.Option("--port", help="TCP port to listen on.")]
 
 
 def _enable_observability(verbose: bool, trace: bool) -> None:
@@ -91,11 +95,20 @@ def suggest(
     verbose: _VerboseOpt = False,
     trace: _TraceOpt = False,
 ) -> None:
-    """Read the note buffer from stdin and print suggestion JSON to stdout."""
+    """Read the note buffer from stdin and print suggestion JSON to stdout.
+
+    One-shot: ``Engine.suggest`` is a pure query (it no longer auto-refreshes —
+    T19), so this adapter refreshes the corpus index FIRST (incremental, cheap
+    when nothing changed) and then queries, preserving the original CLI
+    behaviour. The long-lived server adapter (``api.py``) keeps the index fresh
+    differently — an initial refresh plus a file watcher.
+    """
     _enable_observability(verbose, trace)
     buffer_text = sys.stdin.read()
     settings = _build_settings(corpus)
-    envelope = Engine(settings).suggest(buffer_text)
+    engine = Engine(settings)
+    engine.refresh()
+    envelope = engine.suggest(buffer_text)
     typer.echo(envelope.model_dump_json(indent=2))
 
 
@@ -111,6 +124,47 @@ def index(
     settings = _build_settings(corpus)
     stats = Engine(settings).refresh(rebuild=rebuild)
     typer.echo(json.dumps(stats, indent=2))
+
+
+@app.command()
+def serve(
+    host: _HostOpt = "127.0.0.1",
+    port: _PortOpt = 8765,
+    corpus: _CorpusOpt = None,
+    verbose: _VerboseOpt = False,
+    trace: _TraceOpt = False,
+) -> None:
+    """Run the daemon: a FastAPI app over one long-lived ``Engine`` (T19).
+
+    Constructs ``Settings`` (``--corpus`` overrides ``NOTELINKS_CORPUS_DIR``),
+    sets up logging/tracing via the same observability helpers as the one-shot
+    commands, then serves the FastAPI app under uvicorn bound to ``host``/``port``
+    (``127.0.0.1`` by default — single-user local tool, no auth).
+
+    The server lives behind the optional ``[server]`` extra (FastAPI + uvicorn +
+    watchfiles); it is lazy-imported here so the core install and the default
+    test run never need it. When the extra is absent we exit with an actionable
+    message instead of a raw ``ImportError``.
+    """
+    _enable_observability(verbose, trace)
+    try:
+        import uvicorn
+
+        from notelinks.api import build_app
+    except ImportError as exc:
+        typer.echo(
+            "[notelinks] `serve` needs the optional 'server' extra "
+            "(FastAPI + uvicorn + watchfiles), which is not installed. "
+            "Install it with:  uv sync --extra server   "
+            "(or: pip install 'notelinks[server]').",
+            err=True,
+        )
+        raise typer.Exit(code=1) from exc
+
+    settings = _build_settings(corpus)
+    app_ = build_app(settings)
+    typer.echo(f"[notelinks] serving on http://{host}:{port} (Ctrl-C to stop)", err=True)
+    uvicorn.run(app_, host=host, port=port, log_level="info")
 
 
 if __name__ == "__main__":  # pragma: no cover

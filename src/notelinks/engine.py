@@ -107,30 +107,29 @@ class Engine:
     def suggest(self, buffer_text: str) -> Envelope:
         """Run the full pipeline for one note buffer → an :class:`Envelope`.
 
+        **Pure query (T19):** this no longer refreshes the corpus — it reads the
+        already-built index as it stands. Callers are responsible for freshness:
+        the CLI ``suggest`` calls :meth:`refresh` first (one-shot), and the REST
+        adapter keeps the index fresh via an initial refresh + a file watcher, so
+        a query never auto-refreshes (which would serialize writes into every
+        read and make the server's lock model far harder to reason about).
+
         Flow (design §8–§11):
 
-        1. Auto-refresh the corpus first (design H) — incremental, so it is cheap
-           when nothing changed; this also ensures the on-disk copy of the
-           current note is in the index (it is excluded from retrieval by uuid).
-        2. Parse the BUFFER (not the on-disk copy) so unsaved edits count. The
+        1. Parse the BUFFER (not the on-disk copy) so unsaved edits count. The
            buffer supplies the query chunks; ``content_hash`` covers it verbatim.
-        3. Embed the buffer's chunks and retrieve candidates, excluding the
+        2. Embed the buffer's chunks and retrieve candidates, excluding the
            current note's own chunks and any already-linked targets.
-        4. Judge the candidates into raw suggestions.
-        5. Rank / dedup / cap / enforce invariants (design §10).
-        6. Build and return the wire :class:`Envelope`.
+        3. Judge the candidates into raw suggestions.
+        4. Rank / dedup / cap / enforce invariants (design §10).
+        5. Build and return the wire :class:`Envelope`.
         """
         if self.settings.corpus_dir is None:
             raise ValueError(
                 "settings.corpus_dir is None; set NOTELINKS_CORPUS_DIR or pass --corpus."
             )
 
-        # 1. Auto-refresh the corpus (incremental; cheap when nothing changed).
-        #    Done OUTSIDE the per-run root span: refresh is its own concern and
-        #    its (optional) embedding traffic should not nest under this suggest.
-        self.refresh()
-
-        # 2. Parse the buffer. No file path is taken as input — the note is
+        # 1. Parse the buffer. No file path is taken as input — the note is
         #    identified by its own :ID: (uuid), which also drives self-exclusion.
         note = parse_note(buffer_text)
 
@@ -143,7 +142,7 @@ class Engine:
             "notelinks.suggest",
             {"notelinks.note_id": note.id, "notelinks.note_title": note.title},
         ):
-            # 3. Query chunks come from the buffer (unsaved edits count).
+            # 2. Query chunks come from the buffer (unsaved edits count).
             source_chunks = chunk_note(note, self.settings)
             source_embeddings = embed_texts(
                 [c.embed_text for c in source_chunks],
@@ -157,7 +156,7 @@ class Engine:
                 len(source_chunks),
             )
 
-            # 4. Already-linked targets are never re-suggested.
+            # 3. Already-linked targets are never re-suggested.
             exclude_target_uuids = [link.target_uuid for link in note.links]
 
             # Retrieval wrapped in a (no-op-unless-traced) RETRIEVER span so the
@@ -178,13 +177,13 @@ class Engine:
                 len(exclude_target_uuids),
             )
 
-            # 5. Judge → raw suggestions.
+            # 4. Judge → raw suggestions.
             raw_suggestions = judge_candidates(
                 candidates, note, self.store, self.settings, client=self.judge_client
             )
             logger.info("suggest: judge returned %d raw suggestions", len(raw_suggestions))
 
-            # 6. Rank / dedup / cap / invariants.
+            # 5. Rank / dedup / cap / invariants.
             suggestions = self._finalize(
                 raw_suggestions,
                 note_id=note.id,
@@ -196,7 +195,7 @@ class Engine:
                 self.settings.top_n,
             )
 
-            # 7. Build the envelope.
+            # 6. Build the envelope.
             source = Source(
                 title=note.title,
                 id=note.id,

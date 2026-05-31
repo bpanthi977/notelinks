@@ -28,6 +28,16 @@ trace = [
     "arize-phoenix>=16.3.0",
     "opentelemetry-exporter-otlp>=1.30.0",
 ]
+# Optional 'server' extra (T19): the FastAPI daemon (`notelinks serve`). NOT a
+# core dependency — `api.py` is imported only from `cli.serve` (lazily) and the
+# API tests (guarded by pytest.importorskip), so the core install and the default
+# test run never import them. Install with:
+#   uv sync --extra server   (or: pip install 'notelinks[server]')
+server = [
+    "fastapi>=0.136.3",
+    "uvicorn[standard]>=0.48.0",
+    "watchfiles>=1.2.0",
+]
 
 [project.scripts]
 notelinks = "notelinks.cli:app"
