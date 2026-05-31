@@ -201,7 +201,7 @@ def test_judge_candidates_assembles_suggestion(monkeypatch) -> None:
     canned = JudgeResponse(
         suggestions=[
             RawJudgeSuggestion(
-                target_chunk_id="TGT-UUID:2",
+                candidate_id=1,
                 type="analogous-mechanism",
                 confidence=4,
                 why="Both cast error-correction as the driver of updating.",
@@ -270,7 +270,7 @@ def test_judge_candidates_target_is_note_yields_no_heading(monkeypatch) -> None:
     canned = JudgeResponse(
         suggestions=[
             RawJudgeSuggestion(
-                target_chunk_id="TGT-UUID:2",
+                candidate_id=1,
                 type="generalizes",
                 confidence=3,
                 why="Note-wide resonance.",
@@ -295,7 +295,7 @@ def test_judge_candidates_insert_uses_target_title_description(monkeypatch) -> N
     canned = JudgeResponse(
         suggestions=[
             RawJudgeSuggestion(
-                target_chunk_id="TGT-UUID:2",
+                candidate_id=1,
                 type="elaborates",
                 confidence=5,
                 why="Adds an example.",
@@ -341,7 +341,7 @@ def test_judge_candidates_drops_unanchorable_suggestion(monkeypatch) -> None:
     canned = JudgeResponse(
         suggestions=[
             RawJudgeSuggestion(
-                target_chunk_id="TGT-UUID:2",
+                candidate_id=1,
                 type="contradicts",
                 confidence=4,
                 why="Paraphrased anchor not in chunk.",
@@ -465,7 +465,7 @@ def _canned_for(sid: str, candidates: list[Candidate]) -> JudgeResponse:
     return JudgeResponse(
         suggestions=[
             RawJudgeSuggestion(
-                target_chunk_id=cand.target_chunk.chunk_id,
+                candidate_id=1,
                 type="elaborates",
                 confidence=3,
                 why=f"resonance for group {idx}",

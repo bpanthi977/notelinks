@@ -146,7 +146,7 @@ far more than recall: it is correct and expected to return an EMPTY list when \
 nothing genuinely resonates. Do not link mere topical overlap or shared keywords.
 
 For each candidate you ACCEPT, return one suggestion with:
-* target_chunk_id — the exact id of the accepted candidate (as labelled).
+* candidate_id — the number of the accepted candidate (as labelled, e.g. 1).
 * type — classify the connection, choosing from EXACTLY this enum:
     - "elaborates"            : target develops / adds detail to the source idea.
     - "analogous-mechanism"   : different domains, same underlying mechanism.
@@ -174,17 +174,16 @@ correct, answer.
 
 
 def _format_target_block(
-    candidate: Candidate, neighbour: Chunk | None, label: str
+    candidate: Candidate, neighbour: Chunk | None, label: int
 ) -> str:
     """Render one candidate target passage (+ optional adjacent neighbour)."""
     tc = candidate.target_chunk
     breadcrumb = tc.heading_path or tc.note_title
     lines = [
         f"--- CANDIDATE {label} ---",
-        f"target_chunk_id: {tc.chunk_id}",
+        f"candidate_id: {label}",
         f"target note title: {tc.note_title}",
         f"breadcrumb: {breadcrumb}",
-        f"retrieval score: {candidate.score:.3f}",
         "target passage:",
         tc.text,
     ]
@@ -236,7 +235,7 @@ def _build_messages(
     ]
     for idx, candidate in enumerate(candidates, start=1):
         neighbour = _fetch_neighbour(store, candidate.target_chunk)
-        suffix_parts.append(_format_target_block(candidate, neighbour, f"#{idx}"))
+        suffix_parts.append(_format_target_block(candidate, neighbour, idx))
     suffix = "\n".join(suffix_parts)
 
     return [
@@ -245,7 +244,7 @@ def _build_messages(
             "role": "user",
             "content": [
                 llm.cached_text(
-                    "FULL CURRENT NOTE (context; cached across calls):\n\n"
+                    "FULL CURRENT NOTE:\n\n"
                     + note.text
                 ),
                 {"type": "text", "text": suffix},
@@ -391,11 +390,11 @@ def judge_candidates(
             continue  # the group's LLM call failed and was skipped above.
         group = groups[sid]
         source_chunk = source_by_id[sid]
-        # Map for resolving the judge's target_chunk_id back to a Candidate.
-        target_by_id = {c.target_chunk.chunk_id: c for c in group}
+        # Map the judge's candidate number (1..N, as labelled) back to a Candidate.
+        target_by_label = {i: c for i, c in enumerate(group, start=1)}
 
         for raw in response.suggestions:
-            candidate = target_by_id.get(raw.target_chunk_id)
+            candidate = target_by_label.get(raw.candidate_id)
             if candidate is None:
                 # Judge referenced an id we did not offer — ignore defensively.
                 continue

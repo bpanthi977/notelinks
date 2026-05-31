@@ -284,18 +284,20 @@ def test_suggest_end_to_end_happy_path(env, monkeypatch):
         """Accept the immune target, anchoring on a verbatim span from the buffer."""
         suffix = messages[-1]["content"][-1]["text"]
         # Prefer the immune target id; fall back to the first offered id otherwise.
-        target_id = None
+        chosen = None
+        current = None
         for line in suffix.splitlines():
-            if line.startswith("target_chunk_id:"):
-                cid = line.split(":", 1)[1].strip()
-                if cid.startswith("uuid-immune"):
-                    target_id = cid
-                    break
-                target_id = target_id or cid
+            if line.startswith("candidate_id:"):
+                current = int(line.split(":", 1)[1].strip())
+            elif "Immune Memory" in line and current is not None:
+                chosen = current
+                break
+        if chosen is None:
+            chosen = 1
         return JudgeResponse(
             suggestions=[
                 RawJudgeSuggestion(
-                    target_chunk_id=target_id,
+                    candidate_id=chosen,
                     type="analogous-mechanism",
                     confidence=4,
                     why="Both cast mismatch-correction as the driver of updating.",
@@ -613,18 +615,20 @@ def test_suggest_emits_one_unified_trace(env, monkeypatch):
     # Judge accepts the immune target, anchoring on a verbatim buffer span.
     def fake_complete_structured(messages, settings_, response_model, *, client=None):
         suffix = messages[-1]["content"][-1]["text"]
-        target_id = None
+        chosen = None
+        current = None
         for line in suffix.splitlines():
-            if line.startswith("target_chunk_id:"):
-                cid = line.split(":", 1)[1].strip()
-                if cid.startswith("uuid-immune"):
-                    target_id = cid
-                    break
-                target_id = target_id or cid
+            if line.startswith("candidate_id:"):
+                current = int(line.split(":", 1)[1].strip())
+            elif "Immune Memory" in line and current is not None:
+                chosen = current
+                break
+        if chosen is None:
+            chosen = 1
         return JudgeResponse(
             suggestions=[
                 RawJudgeSuggestion(
-                    target_chunk_id=target_id,
+                    candidate_id=chosen,
                     type="analogous-mechanism",
                     confidence=4,
                     why="Both cast mismatch-correction as the driver of updating.",

@@ -203,7 +203,7 @@ class RawJudgeSuggestion(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    target_chunk_id: str
+    candidate_id: int  # the accepted candidate's number as labelled in the prompt (1..N)
     type: ConnectionType
     confidence: int = Field(ge=1, le=5)
     why: str

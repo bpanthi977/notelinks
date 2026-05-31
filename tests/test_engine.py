@@ -144,22 +144,24 @@ def test_suggest_end_to_end(env, monkeypatch):
 
     def fake_complete_structured(messages, settings_, response_model, *, client=None):
         """Accept the nearest immune target, anchoring on a verbatim buffer span."""
-        # Pull the offered target_chunk_id out of the suffix so we point at a real
-        # retrieved chunk (the engine maps unknown ids away).
+        # Find the immune candidate's number (as labelled) in the suffix so we
+        # point at a real offered candidate (the engine maps unknown ids away).
         suffix = messages[-1]["content"][-1]["text"]
-        target_id = None
+        chosen = None
+        current = None
         for line in suffix.splitlines():
-            if line.startswith("target_chunk_id:"):
-                cid = line.split(":", 1)[1].strip()
-                if cid.startswith("uuid-immune"):
-                    target_id = cid
-                    break
-                target_id = target_id or cid
-        captured["target_id"] = target_id
+            if line.startswith("candidate_id:"):
+                current = int(line.split(":", 1)[1].strip())
+            elif "Immune Memory" in line and current is not None:
+                chosen = current
+                break
+        if chosen is None:
+            chosen = 1
+        captured["candidate_id"] = chosen
         return JudgeResponse(
             suggestions=[
                 RawJudgeSuggestion(
-                    target_chunk_id=target_id,
+                    candidate_id=chosen,
                     type="analogous-mechanism",
                     confidence=4,
                     why="Both cast mismatch-correction as the driver of updating.",

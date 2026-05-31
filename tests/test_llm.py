@@ -33,7 +33,7 @@ _VALID_JUDGE_JSON = json.dumps(
     {
         "suggestions": [
             {
-                "target_chunk_id": "uuid-1:3",
+                "candidate_id": 1,
                 "type": "analogous-mechanism",
                 "confidence": 4,
                 "why": "Both describe feedback loops that stabilize a system.",
