@@ -132,14 +132,68 @@ def _normalize_with_map(text: str) -> tuple[str, list[int]]:
     return "".join(norm), idx_map
 
 
+# Fuzzy-match budget: a candidate region may differ from ``expect`` by at most
+# this fraction of ``expect``'s length (edits). Deliberately tight — the design
+# is precision-first (dropping a suggestion beats anchoring it in the wrong
+# place), and the judge is told to copy verbatim, so only small residual diffs
+# (a "corrected" typo, a dropped word) should ever need fuzzing.
+_FUZZY_MAX_ERROR_RATIO = 0.2
+
+
+def _fuzzy_find(haystack: str, needle: str, max_errors: int) -> tuple[int, int] | None:
+    """Best approximate-substring match of NEEDLE in HAYSTACK by edit distance.
+
+    Sellers' algorithm: a Levenshtein DP in which starting the match at any
+    position in HAYSTACK is free (row 0 is all-zero), so the minimum of the final
+    row is the cost of the best-matching substring ending at each position. We
+    carry each cell's start column alongside the cost to recover ``(start, end)``.
+
+    Returns the lowest-cost region, or ``None`` when even the best match needs
+    more than MAX_ERRORS edits. O(len(needle) * len(haystack)).
+    """
+    m, n = len(needle), len(haystack)
+    if m == 0 or max_errors < 0:
+        return None
+    prev_cost = [0] * (n + 1)
+    prev_start = list(range(n + 1))  # an empty match at column j starts at j
+    for i in range(1, m + 1):
+        cur_cost = [i] + [0] * n
+        cur_start = [0] * (n + 1)
+        pc = needle[i - 1]
+        for j in range(1, n + 1):
+            diag = prev_cost[j - 1] + (0 if pc == haystack[j - 1] else 1)
+            up = prev_cost[j] + 1  # skip a needle char
+            left = cur_cost[j - 1] + 1  # skip a haystack char
+            best = min(diag, up, left)
+            cur_cost[j] = best
+            if best == diag:
+                cur_start[j] = prev_start[j - 1]
+            elif best == up:
+                cur_start[j] = prev_start[j]
+            else:
+                cur_start[j] = cur_start[j - 1]
+        prev_cost, prev_start = cur_cost, cur_start
+    best_j = min(range(n + 1), key=lambda j: prev_cost[j])
+    if prev_cost[best_j] > max_errors:
+        return None
+    return prev_start[best_j], best_j
+
+
 def _find_span(haystack: str, needle: str) -> tuple[int, int] | None:
     """Locate NEEDLE in HAYSTACK, returning ``(start, end)`` offsets in HAYSTACK.
 
-    Prefers an exact substring match. Falls back to a normalized match (org links
-    flattened, whitespace collapsed — see :func:`_normalize_with_map`) so the
-    judge's rendered ``expect`` still anchors when the span crosses a link or a
-    wrapped newline, mapping the normalized hit back to raw offsets. Returns
-    ``None`` when NEEDLE is found by neither.
+    Three escalating passes, all mapped back to raw HAYSTACK offsets:
+
+    1. **exact** substring match (fast path);
+    2. **normalized** match — org links flattened, whitespace collapsed
+       (:func:`_normalize_with_map`) — so the judge's rendered ``expect`` anchors
+       across a link or a wrapped newline;
+    3. **fuzzy** match (:func:`_fuzzy_find`) on the normalized strings, accepted
+       only within :data:`_FUZZY_MAX_ERROR_RATIO`, so small residual wording
+       differences (a "corrected" typo, a dropped word) still anchor while a
+       genuinely absent ``expect`` is still rejected.
+
+    Returns ``None`` when NEEDLE is found by none of them.
     """
     exact = haystack.find(needle)
     if exact != -1:
@@ -149,9 +203,12 @@ def _find_span(haystack: str, needle: str) -> tuple[int, int] | None:
     if not norm_needle:
         return None
     pos = norm_hay.find(norm_needle)
-    if pos == -1:
+    if pos != -1:
+        return idx_map[pos], idx_map[pos + len(norm_needle)]
+    fuzzy = _fuzzy_find(norm_hay, norm_needle, round(_FUZZY_MAX_ERROR_RATIO * len(norm_needle)))
+    if fuzzy is None:
         return None
-    return idx_map[pos], idx_map[pos + len(norm_needle)]
+    return idx_map[fuzzy[0]], idx_map[fuzzy[1]]
 
 
 # ---------------------------------------------------------------------------
@@ -176,11 +233,12 @@ def resolve_anchor(
       behaviour, retained for the pure unit tests / a possible chunk-scoped
       fallback). First occurrence within the span wins.
 
-    Matching is exact first, then tolerant (:func:`_find_span`): the judge sees
-    the raw note but renders org links (``[[id:..][entropy]]`` → ``entropy``) and
-    collapses wrapped newlines, so a literal search would miss spans crossing a
-    link or line wrap. The tolerant pass flattens links / collapses whitespace
-    and maps the hit back to raw offsets.
+    Matching escalates via :func:`_find_span`: exact → normalized (links
+    flattened, whitespace collapsed) → fuzzy (bounded edit distance). The judge
+    sees the raw note but renders org links (``[[id:..][entropy]]`` → ``entropy``),
+    collapses wrapped newlines, and may lightly reword (a "corrected" typo), so a
+    literal search misses; the escalating passes recover the span and map it back
+    to raw offsets, while a genuinely absent ``expect`` is still rejected.
 
     Returns ``None`` if ``expect`` is not found in the chunk span — the caller
     then drops the suggestion or falls back to a whole-chunk wrap.

@@ -82,6 +82,24 @@ core. `source_chunk` is now **optional**:
   long spans).
 - Not found in the chunk span → returns `None`.
 
+**Tolerant matching (`_find_span`).** The judge is shown the *raw* note but
+reliably distorts `expect`: it renders org links to their visible text
+(`[[id:..][entropy]]` → `entropy`), collapses wrapped-paragraph newlines into
+spaces, and occasionally rewords slightly (e.g. "corrects" a typo). A literal
+`find` therefore drops genuine, well-placed suggestions. `_find_span` escalates:
+
+1. **exact** substring match;
+2. **normalized** — `_normalize_with_map` flattens org links to visible text and
+   collapses whitespace runs, matched exactly, then mapped back to raw offsets;
+3. **fuzzy** — Sellers' approximate-substring DP (`_fuzzy_find`, Levenshtein with
+   a free start position) on the normalized strings, accepted only within
+   `_FUZZY_MAX_ERROR_RATIO` (0.2) of `expect`'s length, mapped back to raw.
+
+For `wrap`, `expect` on the wire is the **raw** matched span (not the judge's
+rendered text), so the client matches it verbatim. The error budget is tight on
+purpose: precision-first means a genuinely absent `expect` is still rejected
+(returns `None`) rather than force-anchored to the nearest-looking text.
+
 **Fallback choice (drop, not whole-chunk wrap).** If `resolve_anchor` returns
 `None`, `judge_candidates` **drops** the suggestion. Rationale: a non-matching
 `expect` means the judge paraphrased or pointed outside the chunk, so the

@@ -162,6 +162,43 @@ def test_resolve_anchor_insert_tolerates_org_link_and_wrapped_newline() -> None:
     assert out.after == buffer[end : end + 40]
 
 
+def test_resolve_anchor_fuzzy_tolerates_reworded_expect() -> None:
+    # Judge "corrects" the note's typos when reproducing the sentence
+    # ("uncertainity" -> "uncertainty", "an probability" -> "a probability") and
+    # renders the link. Fuzzy matching still anchors it.
+    buffer = (
+        "Shannon [[id:X][entropy]] assigns amount of uncertainity\n"
+        "to an probability distribution.\n\nNext."
+    )
+    src = make_chunk("S", 0, text=buffer, char_start=0, char_end=len(buffer))
+    anchor = JudgeAnchor(
+        mode="insert",
+        expect="Shannon entropy assigns amount of uncertainty to a probability distribution.",
+        insert_text="See {{link}}.",
+    )
+
+    out = resolve_anchor(anchor, src, buffer)
+
+    assert out is not None
+    end = buffer.index("distribution.") + len("distribution.")
+    assert out.char_start == end  # insert lands right after the real sentence end
+    assert out.before == buffer[max(0, end - 40) : end]
+
+
+def test_resolve_anchor_fuzzy_rejects_absent_expect() -> None:
+    # A sentence with no real counterpart in the note must NOT be force-matched
+    # (precision-first: dropping beats anchoring in the wrong place).
+    buffer = (
+        "Shannon entropy assigns amount of uncertainty to a probability distribution."
+    )
+    src = make_chunk("S", 0, text=buffer, char_start=0, char_end=len(buffer))
+    anchor = JudgeAnchor(
+        mode="wrap", expect="quantum chromodynamics confines colour charge tightly"
+    )
+
+    assert resolve_anchor(anchor, src, buffer) is None
+
+
 def test_resolve_anchor_wrap_through_link_uses_raw_span_text() -> None:
     # A wrap whose rendered expect crosses a link resolves to the RAW span text
     # (with markup), so the wire `expect` matches the buffer verbatim.
