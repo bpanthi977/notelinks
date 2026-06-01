@@ -174,6 +174,50 @@ ENV is an already-built envelope alist.  `content' is bound for BODY."
       (should (= 1 (length notelinks--suggestions)))
       (should (string= "three four" (notelinks-sug-link-desc (car notelinks--suggestions)))))))
 
+;;;; Co-located inserts (multiple inserts at the same anchor)
+
+(defun notelinks-test--coinsert-env ()
+  "Two inserts anchored at the same point (before \"beta\"): templates ONE/TWO."
+  `((version . 1)
+    (source . ((file) (title . "x") (id . "SID")))
+    (suggestions . (,(notelinks-test--sug "A" 3 "" "alpha " "beta" "ONE" "dA")
+                    ,(notelinks-test--sug "B" 3 "" "alpha " "beta" "TWO" "dB")))))
+
+(ert-deftest notelinks-test-coinserts-laid-out-side-by-side ()
+  ;; Both inserts survive (zero-width → not overlapping) and are placed in a
+  ;; single space-separated run, each with its own overlay.
+  (notelinks-test--with-review "alpha beta\n" (notelinks-test--coinsert-env)
+    (should (= 2 (length notelinks--suggestions)))
+    (let ((txt (buffer-string)))
+      (should (string-match-p "alpha \\(ONE TWO\\|TWO ONE\\) beta" txt))
+      (should-not (string-match-p "  " txt)))          ; never a double space
+    ;; the two overlays are distinct and adjacent (separator owned by the 2nd),
+    ;; never stacked on top of each other.
+    (let* ((ovs (sort (mapcar #'notelinks-sug-overlay notelinks--suggestions)
+                      (lambda (a b) (< (overlay-start a) (overlay-start b)))))
+           (a (car ovs)) (b (cadr ovs)))
+      (should (= (overlay-end a) (overlay-start b))))))
+
+(ert-deftest notelinks-test-coinserts-reject-all-restores-buffer ()
+  (let ((content "alpha beta\n"))
+    (notelinks-test--with-review content (notelinks-test--coinsert-env)
+      (should (string-match-p "ONE" (buffer-string)))
+      (notelinks-quit)
+      (should (string= content (buffer-string))))))
+
+(ert-deftest notelinks-test-coinserts-reject-one-keeps-single-space ()
+  ;; Rejecting one co-located insert collapses cleanly (its overlay owns the
+  ;; adjacent separator), leaving the other and no stray double space.
+  (notelinks-test--with-review "alpha beta\n" (notelinks-test--coinsert-env)
+    (let ((b (seq-find (lambda (s) (string= "dB" (notelinks-sug-link-desc s)))
+                       notelinks--suggestions)))
+      (goto-char (overlay-start (notelinks-sug-overlay b)))
+      (notelinks-reject))
+    (let ((txt (buffer-string)))
+      (should (string-match-p "alpha ONE beta" txt))
+      (should-not (string-match-p "TWO" txt))
+      (should-not (string-match-p "  " txt)))))
+
 (ert-deftest notelinks-test-min-confidence-filters ()
   ;; buffer: "one two three four"; A wraps "two" (conf 1), B wraps "four" (conf 3).
   ;; With the default threshold (2) only B survives; lowering it keeps both.

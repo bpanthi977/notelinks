@@ -124,6 +124,15 @@ lower-confidence one (reported as discarded, §9).
 > engine constraint in v1 — the UI's discard-lower-confidence fallback is the
 > only guard. To be called out explicitly in the documentation phase.
 
+**Co-located inserts.** Two *inserts* at the same anchor are zero-width, so they
+don't "overlap" and neither is discarded — instead they are **grouped** and laid
+out **side by side, separated by a single space**, each with its own overlay
+(`notelinks--insert-group`). The whole run is padded from the surrounding text
+by a single space where it would otherwise abut non-space. Spacing lives inside
+the overlays — each owns the separator that *follows* it (the first also owns the
+leading pad) — so the overlays tile the inserted region (full reject restores the
+buffer) and rejecting any one collapses cleanly to a single space.
+
 ## 7. Engine invocation
 
 Two interchangeable transports, selected by `notelinks-backend`; **both feed the

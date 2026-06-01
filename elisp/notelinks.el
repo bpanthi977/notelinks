@@ -313,21 +313,14 @@ BODY is a JSON string (for POST).  Signals on connection failure or non-2xx."
   "Substitute LINK for the {{link}} slot in TEMPLATE."
   (replace-regexp-in-string (regexp-quote "{{link}}") link (or template "{{link}}") t t))
 
-(defun notelinks--space-pad (text pos)
-  "Return TEXT padded with a single space on each side that abuts non-space.
-POS is the buffer position where TEXT will be inserted.  A space is added on a
-side only when both the neighbouring buffer char and TEXT's own edge there are
-non-whitespace, so inserted prose never fuses with the surrounding text.  The
-pads live inside TEXT, so they are reverted cleanly when the insert is rejected."
-  (let* ((wsp '(?\s ?\t ?\n))
-         (len (length text))
-         (before (char-before pos))
-         (after (char-after pos))
-         (lead (and (> len 0) before
-                    (not (memq before wsp)) (not (memq (aref text 0) wsp))))
-         (trail (and (> len 0) after
-                     (not (memq after wsp)) (not (memq (aref text (1- len)) wsp)))))
-    (concat (and lead " ") text (and trail " "))))
+(defconst notelinks--whitespace '(?\s ?\t ?\n)
+  "Characters treated as whitespace when spacing inserted prose.")
+
+(defun notelinks--insert-text (s)
+  "Return the prose to insert for insert-suggestion S (its filled template)."
+  (notelinks--fill (notelinks-sug-template s)
+                   (notelinks--assemble-link (notelinks-sug-target s)
+                                             (or (notelinks-sug-link-desc s) ""))))
 
 ;;;; Anchor resolution
 
@@ -411,6 +404,47 @@ where KEPT is plists and DISCARDED is `notelinks-sug' structs."
     (setf (notelinks-sug-overlay s) ov)
     ov))
 
+(defun notelinks--insert-group (marker sugs)
+  "Insert the insert-suggestions SUGS at MARKER, in order, and overlay each.
+Co-located inserts (the engine emitted several at the same point) are laid out
+left-to-right separated by a single space, and the whole run is padded from the
+surrounding text by a single space wherever it would otherwise abut non-space.
+Spacing lives *inside* the overlays — each overlay owns the separator that
+*follows* its text (the first also owns the leading pad) — so the overlays tile
+the entire inserted region (a full reject restores the buffer exactly) and
+rejecting any one collapses to a single space (the survivors keep their own
+trailing separators).  MARKER is an insertion-type-nil marker at the anchor."
+  (let* ((wsp notelinks--whitespace)
+         (texts (mapcar #'notelinks--insert-text sugs))
+         (n (length texts))
+         (p (marker-position marker))
+         (before (char-before p))
+         (after (char-after p))
+         (first (car texts))
+         (last (car (last texts)))
+         (lead (and before (not (memq before wsp))
+                    (> (length first) 0) (not (memq (aref first 0) wsp))))
+         (trail (and after (not (memq after wsp))
+                     (> (length last) 0) (not (memq (aref last (1- (length last))) wsp))))
+         (chunks nil)                   ; reversed string parts
+         (len 0)
+         (spans nil))                   ; reversed list of (sug start . end), relative to P
+    (cl-loop
+     for text in texts for s in sugs for i from 0 do
+     (let ((start len))
+       (when (and (zerop i) lead) (push " " chunks) (cl-incf len))   ; leading pad
+       (push text chunks) (cl-incf len (length text))
+       (when (or (< i (1- n))                  ; separator before the next insert, or
+                 (and (= i (1- n)) trail))     ; trailing pad after the whole run
+         (push " " chunks) (cl-incf len))
+       (push (cons s (cons start len)) spans)))
+    (save-excursion
+      (goto-char marker)
+      (insert (apply #'concat (nreverse chunks))))
+    ;; MARKER (type nil) stayed at P, before the inserted text.
+    (dolist (sp (nreverse spans))
+      (notelinks--make-overlay (car sp) (+ p (cadr sp)) (+ p (cddr sp))))))
+
 (defun notelinks--on-result (src env)
   (with-current-buffer src
     (let* ((raws (alist-get 'suggestions env))
@@ -432,32 +466,38 @@ where KEPT is plists and DISCARDED is `notelinks-sug' structs."
             unanchorable (nreverse unanchorable))
       ;; Phase 2: discard overlapping lower-confidence suggestions.
       (pcase-let ((`(,kept . ,discarded) (notelinks--filter-overlaps resolved)))
-        ;; Phase 3a: pin every kept range with markers before any edit.
-        (let (marked)
+        ;; Partition kept into wrap spans and insert groups.  Inserts sharing a
+        ;; resolved position are grouped so they are laid out side by side
+        ;; (space-separated) instead of stacking on top of each other.
+        (let ((order (mapcar (lambda (r) (plist-get r :sug)) kept))
+              wraps igroups)
           (dolist (r kept)
-            (let* ((s (plist-get r :sug))
-                   (insert? (eq (notelinks-sug-mode s) 'insert))
-                   ;; beg stays before inserted text; end advances only for
-                   ;; inserts (so the new text lands inside the region).
-                   (tbm (copy-marker (plist-get r :beg) nil))
-                   (tem (copy-marker (plist-get r :end) (and insert? t))))
-              (push (list s tbm tem) marked)))
-          (setq marked (nreverse marked))
-          ;; Phase 3b: perform insertions (markers absorb the shifts).
-          (dolist (m marked)
-            (let ((s (nth 0 m)) (tbm (nth 1 m)))
-              (when (eq (notelinks-sug-mode s) 'insert)
-                (let* ((link (notelinks--assemble-link
-                              (notelinks-sug-target s) (or (notelinks-sug-link-desc s) "")))
-                       (text (notelinks--space-pad
-                              (notelinks--fill (notelinks-sug-template s) link) tbm)))
-                  (save-excursion (goto-char tbm) (insert text))))))
-          ;; Phase 4: build overlays from final marker positions.
-          (dolist (m marked)
-            (let ((s (nth 0 m)) (tbm (nth 1 m)) (tem (nth 2 m)))
-              (notelinks--make-overlay s (marker-position tbm) (marker-position tem))
-              (set-marker tbm nil) (set-marker tem nil)))
-          (setq notelinks--suggestions (mapcar #'car marked)))
+            (let ((s (plist-get r :sug)) (beg (plist-get r :beg)))
+              (if (eq (notelinks-sug-mode s) 'insert)
+                  (let ((cell (assoc beg igroups #'=)))
+                    (if cell (setcdr cell (cons s (cdr cell)))
+                      (push (cons beg (list s)) igroups)))
+                (push r wraps))))
+          (dolist (g igroups) (setcdr g (nreverse (cdr g))))  ; restore kept order
+          ;; Phase 3a: pin every position with markers before any edit (so each
+          ;; insertion's shift is absorbed by the others).
+          (let ((wmarks (mapcar (lambda (r)
+                                  (list (plist-get r :sug)
+                                        (copy-marker (plist-get r :beg) nil)
+                                        (copy-marker (plist-get r :end) nil)))
+                                wraps))
+                (gmarks (mapcar (lambda (g) (cons (copy-marker (car g) nil) (cdr g)))
+                                igroups)))
+            ;; Phase 3b: insert each group's prose and overlay its members.
+            (dolist (gm gmarks)
+              (notelinks--insert-group (car gm) (cdr gm))
+              (set-marker (car gm) nil))
+            ;; Phase 4: overlay the wrap spans from their final marker positions.
+            (dolist (m wmarks)
+              (notelinks--make-overlay (nth 0 m) (marker-position (nth 1 m))
+                                       (marker-position (nth 2 m)))
+              (set-marker (nth 1 m) nil) (set-marker (nth 2 m) nil)))
+          (setq notelinks--suggestions order))
         ;; Report & enter review.
         (notelinks--report notelinks--suggestions unanchorable discarded low)
         (if (null notelinks--suggestions)
