@@ -238,6 +238,25 @@ def root_span(name: str, attributes: dict[str, Any] | None = None) -> Iterator[A
         yield span
 
 
+def record_output(span: Any, output_json: str) -> None:
+    """Attach the final engine output (the envelope JSON) to a span — no-op if off.
+
+    Sets the OpenInference ``OUTPUT_VALUE`` (+ JSON mime type) on ``span`` so the
+    root ``notelinks.suggest`` span shows the exact :class:`Envelope` returned to
+    the frontend as its output in Phoenix. ``span`` is the value yielded by
+    :func:`root_span`; it is ``None`` when tracing was never set up, in which case
+    this imports nothing and does nothing.
+    """
+    if span is None or _TRACER is None:
+        return
+    from openinference.semconv.trace import OpenInferenceMimeTypeValues, SpanAttributes
+
+    span.set_attribute(SpanAttributes.OUTPUT_VALUE, output_json)
+    span.set_attribute(
+        SpanAttributes.OUTPUT_MIME_TYPE, OpenInferenceMimeTypeValues.JSON.value
+    )
+
+
 def current_context() -> Any:
     """Capture the current OTel context to carry across threads (else ``None``).
 

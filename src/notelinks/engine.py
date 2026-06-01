@@ -142,7 +142,7 @@ class Engine:
         with observability.root_span(
             "notelinks.suggest",
             {"notelinks.note_id": note.id, "notelinks.note_title": note.title},
-        ):
+        ) as root:
             # 2. Query chunks come from the buffer (unsaved edits count).
             source_chunks = chunk_note(note, self.settings)
             source_embeddings = embed_texts(
@@ -208,9 +208,12 @@ class Engine:
                 content_hash="sha256:"
                 + hashlib.sha256(buffer_text.encode("utf-8")).hexdigest(),
             )
-            return Envelope(
+            envelope = Envelope(
                 version=_ENVELOPE_VERSION, source=source, suggestions=suggestions
             )
+            # Record the exact wire JSON as the root span's output (no-op untraced).
+            observability.record_output(root, envelope.model_dump_json(indent=2))
+            return envelope
 
     # -- helpers -----------------------------------------------------------
 

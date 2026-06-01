@@ -21,6 +21,7 @@ path, and the four finalize invariants (already-linked exclusion, no self-link,
 per-(target, heading) dedup, top_n cap).
 """
 
+import json
 import os
 import socket
 
@@ -671,6 +672,17 @@ def test_suggest_emits_one_unified_trace(env, monkeypatch):
     # Root span carries the note id/title attributes the engine passed.
     assert root.attributes["notelinks.note_id"] == "uuid-active"
     assert root.attributes["notelinks.note_title"] == "Active Inference"
+
+    # Root span records the final envelope JSON as its OUTPUT_VALUE so the exact
+    # wire response shows up in Phoenix. It round-trips to the returned envelope.
+    from openinference.semconv.trace import OpenInferenceMimeTypeValues, SpanAttributes
+
+    output_value = root.attributes[SpanAttributes.OUTPUT_VALUE]
+    assert (
+        root.attributes[SpanAttributes.OUTPUT_MIME_TYPE]
+        == OpenInferenceMimeTypeValues.JSON.value
+    )
+    assert json.loads(output_value) == envelope.model_dump(mode="json")
 
     # The retrieval span (same thread) shares the root trace.
     for s in by_name["retrieve_candidates"]:
