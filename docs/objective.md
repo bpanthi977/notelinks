@@ -57,7 +57,7 @@ A ranked list of suggestions. Each suggestion:
   insertion point + new text)
 - `target`: the note file, optionally a heading within it
 - `why`: short rationale
-- `confidence`: ranking score (1-5)
+- `confidence`: ranking score (1-3; 3=very strong novel, 2=strong, 1=good)
 
 Cardinality: multiple passages may point at different targets; the overall list
 is capped to a reviewable, ranked top-N.

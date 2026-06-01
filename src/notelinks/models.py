@@ -80,7 +80,7 @@ class Suggestion(BaseModel):
 
     id: str  # stable within this run
     type: ConnectionType
-    confidence: int = Field(ge=1, le=5)  # 1-5
+    confidence: int = Field(ge=1, le=3)  # 1-3 (3=very strong novel, 2=strong, 1=good)
     why: str
     target_excerpt: str
     target: Target
@@ -195,7 +195,7 @@ class RawJudgeSuggestion(BaseModel):
 
     candidate_id: int  # the accepted candidate's number as labelled in the prompt (1..N)
     type: ConnectionType
-    confidence: int = Field(ge=1, le=5)
+    confidence: int = Field(ge=1, le=3)  # 1-3 (3=very strong novel, 2=strong, 1=good)
     why: str
     anchor: JudgeAnchor
     target_is_note: bool  # True = link the whole note; False = the chunk's heading

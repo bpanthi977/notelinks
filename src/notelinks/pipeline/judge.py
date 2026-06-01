@@ -194,7 +194,12 @@ For each candidate you ACCEPT, return one suggestion with:
     - "instance-of"           : the current note is a concrete instance of the target idea.
     - "generalizes"           : target is a general idea the current note instantiates.
     - "mention"               : the current note explicitly names the concept the target is about.
-* confidence — integer 1-5 (5 = certain, strong resonance worth surfacing).
+* confidence — integer 1-3 rating the connection's strength:
+    - 3 : very strong, NOVEL connection (a non-obvious resonance worth surfacing).
+    - 2 : strong connection.
+    - 1 : good connection.
+  Anything weaker than "good" is NOT worth linking — REJECT it (omit it entirely)
+  rather than emitting a low-confidence suggestion. Precision over recall.
 * why — one tight sentence naming the shared idea (what resonates), not a summary.
 * target_is_note — true to link the WHOLE target note (connection is note-wide),
     false to link the target passage's owning HEADING (the default; prefer this).

@@ -84,7 +84,7 @@ keeps async drift small; markers absorb the rest.
 {
   "id": "s01",                               // stable within this run
   "type": "analogous-mechanism",             // see enum below
-  "confidence": 4,                           // 1–5
+  "confidence": 3,                           // 1–3 (3=very strong novel, 2=strong, 1=good)
   "why": "Both cast error-correction as the driver of updating.",
 
   // ---- DISPLAY: what the target says (the user judges on this + why) ----

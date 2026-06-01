@@ -203,7 +203,7 @@ def test_judge_candidates_assembles_suggestion(monkeypatch) -> None:
             RawJudgeSuggestion(
                 candidate_id=1,
                 type="analogous-mechanism",
-                confidence=4,
+                confidence=3,
                 why="Both cast error-correction as the driver of updating.",
                 anchor=JudgeAnchor(mode="wrap", expect="driving signal"),
                 target_is_note=False,
@@ -226,7 +226,7 @@ def test_judge_candidates_assembles_suggestion(monkeypatch) -> None:
     sug = out[0]
     assert sug.id == "s01"
     assert sug.type == "analogous-mechanism"
-    assert sug.confidence == 4
+    assert sug.confidence == 3
     assert sug.why.startswith("Both cast error-correction")
 
     # Target components from the matched target chunk (heading-level target).
@@ -292,7 +292,7 @@ def test_judge_candidates_insert_uses_target_title_description(monkeypatch) -> N
             RawJudgeSuggestion(
                 candidate_id=1,
                 type="elaborates",
-                confidence=5,
+                confidence=3,
                 why="Adds an example.",
                 anchor=JudgeAnchor(
                     mode="insert",
@@ -338,7 +338,7 @@ def test_judge_candidates_drops_unanchorable_suggestion(monkeypatch) -> None:
             RawJudgeSuggestion(
                 candidate_id=1,
                 type="contradicts",
-                confidence=4,
+                confidence=2,
                 why="Paraphrased anchor not in chunk.",
                 anchor=JudgeAnchor(mode="wrap", expect="phrase that is absent"),
                 target_is_note=False,

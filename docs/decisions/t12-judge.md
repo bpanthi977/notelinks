@@ -132,8 +132,9 @@ context-snippet/locator split in v1.
 - Demands **precision over recall**: suggest only GENUINE, worth-linking
   connections; an **empty** list is valid and often correct; reject topical /
   keyword overlap.
-- For each accepted candidate: return the offered `target_chunk_id`, a 1–5
-  `confidence`, a tight one-sentence `why` (the shared idea, not a summary),
+- For each accepted candidate: return the offered `target_chunk_id`, a 1–3
+  `confidence` (3=very strong novel, 2=strong, 1=good; reject anything weaker),
+  a tight one-sentence `why` (the shared idea, not a summary),
   `target_is_note` (false = link the chunk's heading, the default), and an
   `anchor` whose `expect` is **copied verbatim from the current note**.
   **Anchor-shape steer (quality):** `mode="insert"` is the **default** for

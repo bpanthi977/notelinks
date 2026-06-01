@@ -35,7 +35,7 @@ _VALID_JUDGE_JSON = json.dumps(
             {
                 "candidate_id": 1,
                 "type": "analogous-mechanism",
-                "confidence": 4,
+                "confidence": 2,
                 "why": "Both describe feedback loops that stabilize a system.",
                 "anchor": {
                     "mode": "wrap",
@@ -164,7 +164,7 @@ def test_falls_back_to_json_object_on_strict_rejection(
 def test_strict_schema_strips_unsupported_numeric_constraints(settings: Settings) -> None:
     """Anthropic via OpenRouter 400s on minimum/maximum for integer types.
 
-    Pydantic emits ``minimum``/``maximum`` for ``confidence: int = Field(ge=1, le=5)``.
+    Pydantic emits ``minimum``/``maximum`` for ``confidence: int = Field(ge=1, le=3)``.
     The strict json_schema we SEND must have those stripped (the constraint is still
     enforced when we validate the response through the pydantic model).
     """

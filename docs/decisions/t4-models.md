@@ -15,7 +15,7 @@ the wire contract, and **internal** models used only by the pipeline.
 | `TargetHeading` | `text: str`, `id: str \| None`, `level: int` |
 | `Target` | `file: str`, `title: str`, `file_id: str`, `heading: TargetHeading \| None` |
 | `SourceAnchor` | `char_start: int`, `char_end: int`, `expect: str`, `before: str`, `after: str`, `template: str`, `link_description: str` |
-| `Suggestion` | `id: str`, `type: ConnectionType`, `confidence: int (1–5)`, `why: str`, `source_chunk: SourceChunk`, `target_excerpt: str`, `target: Target`, `source_anchor: SourceAnchor` |
+| `Suggestion` | `id: str`, `type: ConnectionType`, `confidence: int (1–3)`, `why: str`, `source_chunk: SourceChunk`, `target_excerpt: str`, `target: Target`, `source_anchor: SourceAnchor` |
 | `Envelope` | `version: int`, `source: Source`, `suggestions: list[Suggestion]` |
 
 ### B) Internal models (pipeline only — NOT the contract; design §4–§8)
@@ -33,7 +33,7 @@ the wire contract, and **internal** models used only by the pipeline.
 | Model | Fields |
 |-------|--------|
 | `JudgeAnchor` | `mode: Literal["wrap","insert"]`, `expect: str`, `insert_text: str \| None` |
-| `RawJudgeSuggestion` | `target_chunk_id: str`, `type: ConnectionType`, `confidence: int (1–5)`, `why: str`, `anchor: JudgeAnchor`, `target_is_note: bool` |
+| `RawJudgeSuggestion` | `target_chunk_id: str`, `type: ConnectionType`, `confidence: int (1–3)`, `why: str`, `anchor: JudgeAnchor`, `target_is_note: bool` |
 | `JudgeResponse` | `suggestions: list[RawJudgeSuggestion]` |
 
 ## Naming / typing choices
@@ -48,7 +48,7 @@ the wire contract, and **internal** models used only by the pipeline.
   field on `SourceChunk`. design §12 calls it `Heading`; renamed to
   `TargetHeading` for clarity since two different `heading`-shaped things exist.
 - **`X | None`** everywhere (modern union syntax), never `Optional`.
-- **`confidence` bounds** enforced with `Field(ge=1, le=5)` on both the output
+- **`confidence` bounds** enforced with `Field(ge=1, le=3)` on both the output
   `Suggestion` and the judge `RawJudgeSuggestion`. Out-of-range values raise
   `ValidationError` (tested 0 and 6).
 - **`Chunk.chunk_id`** is a pydantic `@computed_field` `@property`, so it appears

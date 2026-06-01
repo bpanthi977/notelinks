@@ -114,7 +114,7 @@ def _fake_complete_structured(messages, settings_, response_model, *, client=Non
             RawJudgeSuggestion(
                 candidate_id=chosen,
                 type="analogous-mechanism",
-                confidence=4,
+                confidence=2,
                 why="Both cast mismatch-correction as the driver of updating.",
                 anchor=JudgeAnchor(mode="wrap", expect="propagates corrections"),
                 target_is_note=False,

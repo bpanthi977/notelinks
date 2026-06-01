@@ -33,7 +33,7 @@ _VALID_JUDGE_JSON = json.dumps(
             {
                 "candidate_id": 1,
                 "type": "analogous-mechanism",
-                "confidence": 4,
+                "confidence": 2,
                 "why": "Both describe feedback loops that stabilize a system.",
                 "anchor": {
                     "mode": "wrap",

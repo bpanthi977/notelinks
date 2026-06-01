@@ -303,7 +303,7 @@ def test_suggest_end_to_end_happy_path(env, monkeypatch):
                 RawJudgeSuggestion(
                     candidate_id=chosen,
                     type="analogous-mechanism",
-                    confidence=4,
+                    confidence=2,
                     why="Both cast mismatch-correction as the driver of updating.",
                     anchor=JudgeAnchor(mode="wrap", expect="propagates corrections"),
                     target_is_note=False,
@@ -433,14 +433,14 @@ def test_already_linked_target_is_never_suggested(env, monkeypatch):
             file_id="uuid-immune",
             file="immune-memory.org",
             title="Immune Memory",
-            confidence=5,
+            confidence=3,
         ),
         _suggestion(
             sid="s02",
             file_id="uuid-control",
             file="control-theory.org",
             title="Control Theory",
-            confidence=3,
+            confidence=2,
         ),
     ]
     _patch_judge(monkeypatch, raw)
@@ -464,14 +464,14 @@ def test_self_link_is_never_a_target(env, monkeypatch):
             file_id="uuid-active",  # self!
             file="active-inference.org",
             title="Active Inference",
-            confidence=5,
+            confidence=3,
         ),
         _suggestion(
             sid="s02",
             file_id="uuid-control",
             file="control-theory.org",
             title="Control Theory",
-            confidence=4,
+            confidence=2,
         ),
     ]
     _patch_judge(monkeypatch, raw)
@@ -490,13 +490,13 @@ def test_dedup_keeps_highest_confidence_per_target_and_heading(env, monkeypatch)
     corpus_dir, settings, spy = env
 
     raw = [
-        # Same (immune, "Affinity maturation") twice -> keep the conf=5 one.
+        # Same (immune, "Affinity maturation") twice -> keep the conf=3 one.
         _suggestion(
             sid="s01",
             file_id="uuid-immune",
             file="immune-memory.org",
             title="Immune Memory",
-            confidence=2,
+            confidence=1,
             heading_text="Affinity maturation",
         ),
         _suggestion(
@@ -504,7 +504,7 @@ def test_dedup_keeps_highest_confidence_per_target_and_heading(env, monkeypatch)
             file_id="uuid-immune",
             file="immune-memory.org",
             title="Immune Memory",
-            confidence=5,
+            confidence=3,
             heading_text="Affinity maturation",
         ),
         # Same target note, DIFFERENT heading -> kept separately.
@@ -513,7 +513,7 @@ def test_dedup_keeps_highest_confidence_per_target_and_heading(env, monkeypatch)
             file_id="uuid-immune",
             file="immune-memory.org",
             title="Immune Memory",
-            confidence=4,
+            confidence=2,
             heading_text="Clonal selection",
         ),
     ]
@@ -532,13 +532,13 @@ def test_dedup_keeps_highest_confidence_per_target_and_heading(env, monkeypatch)
         ("uuid-immune", "Affinity maturation"),
         ("uuid-immune", "Clonal selection"),
     ]
-    # The kept "Affinity maturation" suggestion is the conf=5 one.
+    # The kept "Affinity maturation" suggestion is the conf=3 one.
     aff = next(
         s
         for s in envelope.suggestions
         if s.target.heading and s.target.heading.text == "Affinity maturation"
     )
-    assert aff.confidence == 5
+    assert aff.confidence == 3
     # Confidence-sorted desc overall.
     confs = [s.confidence for s in envelope.suggestions]
     assert confs == sorted(confs, reverse=True)
@@ -558,7 +558,7 @@ def test_top_n_cap_is_respected(env, monkeypatch):
             title=f"Target {i}",
             confidence=conf,
         )
-        for i, conf in enumerate([5, 4, 3, 2, 1], start=1)
+        for i, conf in enumerate([3, 3, 2, 2, 1], start=1)
     ]
     _patch_judge(monkeypatch, raw)
 
@@ -568,7 +568,7 @@ def test_top_n_cap_is_respected(env, monkeypatch):
 
     assert len(envelope.suggestions) == 2  # capped to top_n
     # The two highest-confidence survived, in order, renumbered s01/s02.
-    assert [s.confidence for s in envelope.suggestions] == [5, 4]
+    assert [s.confidence for s in envelope.suggestions] == [3, 3]
     assert [s.id for s in envelope.suggestions] == ["s01", "s02"]
 
 
@@ -631,7 +631,7 @@ def test_suggest_emits_one_unified_trace(env, monkeypatch):
                 RawJudgeSuggestion(
                     candidate_id=chosen,
                     type="analogous-mechanism",
-                    confidence=4,
+                    confidence=2,
                     why="Both cast mismatch-correction as the driver of updating.",
                     anchor=JudgeAnchor(mode="wrap", expect="propagates corrections"),
                     target_is_note=False,

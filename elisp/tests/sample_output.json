@@ -11,7 +11,7 @@
     {
       "id": "s01",
       "type": "analogous-mechanism",
-      "confidence": 5,
+      "confidence": 3,
       "why": "The note's epistemic = H(model-averaged prediction) - E_theta[H(per-model prediction)] is exactly the mutual-information identity I(X;Y) = H(X) - H(X|Y) defined in the target. Same decomposition, different notation.",
       "target_excerpt": "I(X;Y) = H(X) + H(Y) - H(X,Y);  I(X;Y) = H(X) - H(X|Y). Mutual information is also not dependent on the units and is non zero.",
       "target": {
@@ -37,7 +37,7 @@
     {
       "id": "s02",
       "type": "analogous-mechanism",
-      "confidence": 4,
+      "confidence": 2,
       "why": "Laplace approximation picks a Gaussian as the local model of the posterior; the target shows the Gaussian is the maximum-entropy distribution for a given mean and variance - the least-committal choice, which is why it is the natural approximating family.",
       "target_excerpt": "the gaussian distribution maximizes the entropy ... H[x] = 1/2 ( 1 + ln 2 pi sigma^2 ). (ROAM alias: Gaussian maximizes entropy for a given mean and variance.)",
       "target": {
@@ -63,7 +63,7 @@
     {
       "id": "s03",
       "type": "mention",
-      "confidence": 3,
+      "confidence": 1,
       "why": "The phrase names the entropy of a mixture distribution; links the bare term to the canonical Entropy note for definition.",
       "target_excerpt": "Average amount of information that you get from a message. Entropy of a discrete random variable X ... H(X) = - sum_i p_i log p_i.",
       "target": {
@@ -85,7 +85,7 @@
     {
       "id": "s04",
       "type": "analogous-mechanism",
-      "confidence": 3,
+      "confidence": 1,
       "why": "Averaging the prediction over the posterior ensemble of models mirrors a macrostate as an ensemble over microstates - uncertainty as an average over a population of configurations.",
       "target_excerpt": "the arrangement of objects in the bins is called a microstate and overall distribution n_i/N is called macrostate ... S = k ln W, W is the number of possible microstates in a macrostate.",
       "target": {
