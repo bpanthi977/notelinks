@@ -75,6 +75,24 @@ ENV is an already-built envelope alist.  `content' is bound for BODY."
                     (heading . ((text . "Some Heading") (id) (level . 1))))
                   "desc"))))
 
+(ert-deftest notelinks-test-insert-text-uses-heading-text-as-desc ()
+  ;; Insert to a heading target: description is the heading text, not the
+  ;; engine's link_description.
+  (let ((s (notelinks--make-sug
+            '((id . "h") (type . "elaborates") (confidence . 3) (why . "w")
+              (target_excerpt . "e")
+              (target . ((file . "f.org") (title . "T") (file_id . "FID")
+                         (heading . ((text . "Heading Text") (id . "HID") (level . 1)))))
+              (source_anchor . ((char_start . 0) (char_end . 0)
+                                (expect . "") (before . "x ") (after . "y")
+                                (template . "{{link}}")
+                                (link_description . "ENGINE-DESC")))))))
+    (should (string= "[[id:HID][Heading Text]]" (notelinks--insert-text s))))
+  ;; File-level target (no heading) keeps the engine's link_description.
+  (let ((s (notelinks--make-sug
+            (notelinks-test--sug "f" 3 "" "x " "y" "{{link}}" "ENGINE-DESC"))))
+    (should (string= "[[id:FID][ENGINE-DESC]]" (notelinks--insert-text s)))))
+
 ;;;; Unit tests — template filling
 
 (ert-deftest notelinks-test-fill-substitutes-link ()
@@ -101,9 +119,11 @@ ENV is an already-built envelope alist.  `content' is bound for BODY."
     (notelinks-test--accept-all)
     (should (= 0 (length notelinks--suggestions)))
     (let ((txt (buffer-string)))
-      ;; insert anchor -> heading-with-id link inside engine-authored prose
+      ;; insert anchor -> heading-with-id link inside engine-authored prose;
+      ;; a heading target uses the heading text ("Differential Entropy") as desc
+      ;; (not the engine's link_description "Mutual Information").
       (should (string-match-p
-               (regexp-quote "[[id:6398DC98-3FD0-45B5-B2CA-E0D8E81F5583][Mutual Information]]") txt))
+               (regexp-quote "[[id:6398DC98-3FD0-45B5-B2CA-E0D8E81F5583][Differential Entropy]]") txt))
       ;; wrap-span -> heading-with-id
       (should (string-match-p
                (regexp-quote "[[id:9E185F19-501A-4C4C-BD7B-8D57105C70AE][gaussain]]") txt))

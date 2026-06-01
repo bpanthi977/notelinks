@@ -127,6 +127,11 @@ Given `target` and the description `link_description`:
 
 Then substitute the result for `{{link}}` in `template`.
 
+`<desc>` for an **insert** is `heading.text` when the target is a heading,
+otherwise `link_description` (a heading-targeted link reads as the heading's
+title). **Wrap-spans** always use the existing span text as `<desc>`, so
+accepting one never rewrites the user's prose.
+
 ## Connection type enum
 
 `elaborates`, `analogous-mechanism`, `contradicts`, `instance-of`,

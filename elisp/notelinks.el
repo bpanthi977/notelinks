@@ -312,14 +312,24 @@ BODY is a JSON string (for POST).  Signals on connection failure or non-2xx."
   "Substitute LINK for the {{link}} slot in TEMPLATE."
   (replace-regexp-in-string (regexp-quote "{{link}}") link (or template "{{link}}") t t))
 
+(defun notelinks--heading-text (target)
+  "Heading text of TARGET when it points at a heading (not file-level), else nil."
+  (let ((heading (alist-get 'heading target)))
+    (and heading (alist-get 'text heading))))
+
 (defconst notelinks--whitespace '(?\s ?\t ?\n)
   "Characters treated as whitespace when spacing inserted prose.")
 
 (defun notelinks--insert-text (s)
-  "Return the prose to insert for insert-suggestion S (its filled template)."
-  (notelinks--fill (notelinks-sug-template s)
-                   (notelinks--assemble-link (notelinks-sug-target s)
-                                             (or (notelinks-sug-link-desc s) ""))))
+  "Return the prose to insert for insert-suggestion S (its filled template).
+When the target is a heading, the heading's text is used as the link
+description; otherwise the engine's `link_description' is used."
+  (let* ((target (notelinks-sug-target s))
+         (desc (or (notelinks--heading-text target)
+                   (notelinks-sug-link-desc s)
+                   "")))
+    (notelinks--fill (notelinks-sug-template s)
+                     (notelinks--assemble-link target desc))))
 
 ;;;; Anchor resolution
 
