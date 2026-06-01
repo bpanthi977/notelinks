@@ -24,6 +24,7 @@ engine's job (T13, design §10). It returns the raw `list[Suggestion]`.
 from __future__ import annotations
 
 import logging
+import re
 import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING
@@ -53,6 +54,33 @@ if TYPE_CHECKING:
 _CONTEXT_CHARS = 40
 # Cap on the target-chunk excerpt copied into the output (chars).
 _TARGET_EXCERPT_MAX = 600
+
+# Property/other drawer lines (``:PROPERTIES:`` … ``:END:``). Stripped from the
+# current-note view shown to the judge — never a valid link anchor (design §4).
+_DRAWER_OPEN_RE = re.compile(r"^[ \t]*:([A-Za-z0-9_-]+):[ \t]*$")
+_DRAWER_END_RE = re.compile(r"^[ \t]*:END:[ \t]*$", re.IGNORECASE)
+
+
+def _strip_drawers(text: str) -> str:
+    """Drop ``:DRAWER:`` … ``:END:`` blocks from the note view shown to the judge.
+
+    Display-only: the judge anchors on body prose, so removing drawers keeps it
+    from ever proposing a property-drawer line. ``resolve_anchor`` still searches
+    the ORIGINAL ``note.text``, so output offsets are unaffected.
+    """
+    out: list[str] = []
+    in_drawer = False
+    for line in text.splitlines(keepends=True):
+        stripped = line.rstrip("\n")
+        if in_drawer:
+            if _DRAWER_END_RE.match(stripped):
+                in_drawer = False
+            continue
+        if _DRAWER_OPEN_RE.match(stripped) and not _DRAWER_END_RE.match(stripped):
+            in_drawer = True
+            continue
+        out.append(line)
+    return "".join(out)
 
 
 # ---------------------------------------------------------------------------
@@ -184,8 +212,11 @@ For each candidate you ACCEPT, return one suggestion with:
       short noun phrase of about 1-5 words (a term, not a clause). NEVER wrap a
       whole sentence, clause, or passage — if the natural anchor is longer than a
       few words, use mode="insert" instead.
-    The expect text MUST appear verbatim in the current note. Do not emit
-    before/after offsets — the engine computes those.
+    The expect text MUST appear verbatim in the current note, and MUST be drawn
+    from the note's BODY PROSE — never anchor on the note title (`#+title:`) or a
+    heading line (a line beginning with `*`). Headings and the title are shown
+    only as structure/context, not as link targets. Do not emit before/after
+    offsets — the engine computes those.
 
 Return ONLY the structured object. An empty suggestions list is a valid, often
 correct, answer.
@@ -261,7 +292,7 @@ def _build_messages(
         {
             "role": "user",
             "content": [
-                llm.cached_text("FULL CURRENT NOTE:\n\n" + note.text),
+                llm.cached_text("FULL CURRENT NOTE:\n\n" + _strip_drawers(note.text)),
                 {"type": "text", "text": suffix},
             ],
         },
