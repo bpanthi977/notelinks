@@ -2,7 +2,7 @@
 
 ;; Author: notelinks
 ;; Keywords: outlines, convenience, org
-;; Package-Requires: ((emacs "27.1"))
+;; Package-Requires: ((emacs "27.1") (posframe "1.1.0"))
 
 ;;; Commentary:
 
@@ -79,21 +79,30 @@ A green outline distinguishes inserted text from a wrapped span.")
   "List of live `notelinks-sug' structs being reviewed in this buffer.")
 
 (defvar-local notelinks--info-window nil
-  "Bottom side window showing the current suggestion's info + key legend.")
+  "Bottom side window showing the key legend for the review session.")
 
 (defvar-local notelinks--panel-current nil
-  "The suggestion last rendered in the info panel (to avoid needless redraws).")
+  "The suggestion last shown in the info posframe (to avoid needless redraws).")
 
 (defvar-local notelinks--panel-source nil
   "In the panel buffer, the source note buffer whose review it belongs to.")
 
 (defconst notelinks--panel-buffer-name "*notelinks-review*"
-  "Name of the buffer shown in the bottom info/keys side window.")
+  "Name of the buffer shown in the bottom key-legend side window.")
+
+(defconst notelinks--info-buffer-name " *notelinks-info*"
+  "Name of the posframe buffer showing the current suggestion's details.")
 
 ;; Forward declarations (defined fully near the bottom of the file).
 (defvar notelinks-overlay-map)
 (defvar notelinks-review-mode)
 (declare-function org-link-open-from-string "ol" (s &optional arg))
+(declare-function posframe-workable-p "posframe" ())
+(declare-function posframe-show "posframe" (buffer &rest args))
+(declare-function posframe-hide "posframe" (buffer))
+(declare-function posframe-delete "posframe" (buffer))
+(declare-function posframe-poshandler-point-bottom-left-corner "posframe" (info))
+(declare-function posframe-poshandler-point-bottom-left-corner-upward "posframe" (info))
 
 ;;;; Engine invocation
 
@@ -614,28 +623,21 @@ where KEPT is plists and DISCARDED is `notelinks-sug' structs."
   (when notelinks-review-mode (notelinks-review-mode -1))
   (message "notelinks: review done"))
 
-;;;; Info / keys side panel
+;;;; Key legend (bottom side panel) + target info (posframe)
 
 (defconst notelinks--panel-keys
   "  a accept   r reject   n next   p previous   j jump   q quit
   (off-overlay: C-c C-n / C-c C-p / C-c C-j / C-c C-q)"
-  "Key legend shown at the bottom of the info panel.")
-
-(defun notelinks--panel-text (s)
-  "Text for the panel: suggestion S's details (or a hint) plus the key legend."
-  (concat (if s
-              (notelinks--describe s)
-            "(move onto a highlighted suggestion to see its details)")
-          "\n\n" notelinks--panel-keys))
+  "Key legend shown in the bottom side panel for the whole session.")
 
 (defvar notelinks-panel-mode-map
   (let ((m (make-sparse-keymap)))
     (define-key m "q" #'notelinks-panel-quit)
     m)
-  "Keymap for the info/keys side panel buffer.")
+  "Keymap for the key-legend side panel buffer.")
 
 (define-derived-mode notelinks-panel-mode special-mode "NoteLinks-Panel"
-  "Major mode for the notelinks info/keys side panel.")
+  "Major mode for the notelinks key-legend side panel.")
 
 (defun notelinks-panel-quit ()
   "Close the panel and quit the review session it belongs to."
@@ -646,8 +648,10 @@ where KEPT is plists and DISCARDED is `notelinks-sug' structs."
                (notelinks-quit))
       (notelinks--hide-panel))))
 
-(defun notelinks--render-panel (s)
-  "Write suggestion S's panel text into the panel buffer."
+;;; Bottom side panel — the static key legend.
+
+(defun notelinks--render-panel ()
+  "Populate the bottom panel buffer with the (static) key legend."
   (let ((src (current-buffer))
         (buf (get-buffer-create notelinks--panel-buffer-name)))
     (with-current-buffer buf
@@ -655,39 +659,91 @@ where KEPT is plists and DISCARDED is `notelinks-sug' structs."
       (setq notelinks--panel-source src)
       (let ((inhibit-read-only t))
         (erase-buffer)
-        (insert (notelinks--panel-text s))
+        (insert notelinks--panel-keys)
         (goto-char (point-min)))
       (setq-local mode-line-format nil))
     buf))
 
-(defun notelinks--fit-panel ()
-  "Grow/shrink the side window to fit its content (bounded), so the info
-*and* the key legend are both visible."
-  (when (window-live-p notelinks--info-window)
-    (fit-window-to-buffer notelinks--info-window 16 5)))
-
 (defun notelinks--show-panel ()
-  "Open the bottom side window with the info/keys panel."
-  (setq notelinks--panel-current :none)        ; force the first real render
+  "Open the bottom side window with the key legend."
+  (setq notelinks--panel-current :none)        ; force the first info render
   (setq notelinks--info-window
         (display-buffer-in-side-window
-         (notelinks--render-panel nil)
-         '((side . bottom) (window-height . 8))))
-  (notelinks--fit-panel))
+         (notelinks--render-panel)
+         '((side . bottom) (window-height . 4))))
+  (when (window-live-p notelinks--info-window)
+    (fit-window-to-buffer notelinks--info-window 4 2)))
+
+;;; Target info — a posframe near point (echo area on a TTY).
+
+(defun notelinks--posframe-usable-p ()
+  "Non-nil if posframe is available and can display on this frame."
+  (and (require 'posframe nil t) (posframe-workable-p)))
+
+(defun notelinks--bol (pos)
+  "Return the beginning-of-line position of POS."
+  (save-excursion (goto-char pos) (line-beginning-position)))
+
+(defun notelinks--info-line-count (text)
+  "Estimate the posframe's height in text lines for TEXT (with border slack)."
+  (+ 2 (cl-count ?\n text)))
+
+(defun notelinks--info-fits-below-p (pos lines)
+  "Non-nil if LINES text lines fit below POS in the selected window.
+Nil when POS is scrolled out of view (the span runs past the window bottom)."
+  (let* ((posn (posn-at-point pos))
+         (y (and posn (cdr (posn-x-y posn))))
+         (line-h (default-line-height)))
+    (and y (>= (- (window-body-height nil t) y line-h) (* lines line-h)))))
+
+(defun notelinks--show-info (s)
+  "Show suggestion S's details in a posframe that never covers its span.
+Anchors use the **beginning of the line** (not the span's column), so the frame
+is left-aligned and never pushed off the right edge of the frame by a span near
+the right margin.  By default the posframe is anchored at the overlay's **end**
+line and opens **downward**, so the whole inserted/wrapped span (however many
+lines) stays above it.  Only when the span's end sits too near the window bottom
+for the posframe to fit below is it anchored at the overlay's **beginning** line
+and opened **upward** instead — keeping the span below it.  A bare-point
+fallback covers the (unexpected) overlay-less case."
+  (if (notelinks--posframe-usable-p)
+      (let* ((ov (notelinks-sug-overlay s))
+             (text (notelinks--describe s))
+             (beg (notelinks--bol (if ov (overlay-start ov) (point))))
+             (end (notelinks--bol (if ov (overlay-end ov) (point))))
+             (down (notelinks--info-fits-below-p end (notelinks--info-line-count text))))
+        (posframe-show notelinks--info-buffer-name
+                       :string text
+                       :position (if down end beg)
+                       :poshandler (if down
+                                       #'posframe-poshandler-point-bottom-left-corner
+                                     #'posframe-poshandler-point-bottom-left-corner-upward)
+                       :max-width 72
+                       :internal-border-width 1
+                       :internal-border-color "gray50"
+                       :background-color (face-background 'tooltip nil t)))
+    ;; No graphical frame (e.g. a TTY): fall back to the echo area.
+    (message "%s" (notelinks--describe s))))
+
+(defun notelinks--hide-info ()
+  "Hide the target-info posframe, if one is shown."
+  (when (and (featurep 'posframe) (get-buffer notelinks--info-buffer-name))
+    (posframe-hide notelinks--info-buffer-name)))
 
 (defun notelinks--update-panel ()
-  "Refresh the panel to show the suggestion at point, if it changed.
+  "Track point: show the suggestion under point in the info posframe.
 Bound to `post-command-hook' (buffer-local) and called after programmatic
-moves, so the target info tracks point inside the existing side window —
-it never pops its own buffer over the note being edited."
-  (when notelinks--info-window
+moves; re-renders only when the suggestion under point changes, and hides
+the posframe when point leaves every suggestion."
+  (when notelinks-review-mode
     (let ((s (notelinks--at-point)))
       (unless (eq s notelinks--panel-current)
         (setq notelinks--panel-current s)
-        (notelinks--render-panel s)
-        (notelinks--fit-panel)))))
+        (if s (notelinks--show-info s) (notelinks--hide-info))))))
 
 (defun notelinks--hide-panel ()
+  (when (and (featurep 'posframe) (get-buffer notelinks--info-buffer-name))
+    (posframe-delete notelinks--info-buffer-name))
   (when (window-live-p notelinks--info-window)
     (delete-window notelinks--info-window))
   (setq notelinks--info-window nil

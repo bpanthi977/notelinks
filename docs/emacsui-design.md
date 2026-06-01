@@ -73,27 +73,36 @@ overlay's own `keymap` property:
   stays "on" suggestions throughout normal flow. If they wander off to edit,
   they return by moving onto a suggestion or via the `C-c` bindings.
 - An **ispell-style bottom side window** (`*notelinks-review*`) shows the
-  `a/r/n/p/j/q` keys for the duration of the session, *and* the current
-  suggestion's metainfo (§4). It closes on quit / when no suggestions remain.
+  `a/r/n/p/j/q` key legend for the duration of the session — *keys only*. The
+  current suggestion's metainfo lives in a posframe (§4). It closes on quit /
+  when no suggestions remain.
 
-## 4. Metainfo — bottom info panel
+## 4. Metainfo — target-info posframe
 
-The current suggestion's details render **into the same bottom side window as
-the key legend** (§3), not a separate popup. This was a deliberate change from
-an earlier eldoc-buffer approach: eldoc would pop its own `*eldoc*` window over
-the note being edited. Keeping info + keys in one fixed side window never hides
-the working buffer.
+The current suggestion's details render **into a posframe anchored just past the
+suggestion's overlay**, separate from the bottom key legend (§3). The bottom side
+window is a fixed two-line legend; the posframe floats next to the suggestion
+under review, so the details sit where the eye already is rather than at the
+bottom of the frame.
 
-- Panel content: **type**, **confidence (1–5)**, **why**, **target** (note title
-  + heading), a snippet of the **target excerpt**, then the key legend. The side
-  window auto-fits its content (`fit-window-to-buffer`, bounded) so the info and
-  the keys are **both** visible; the excerpt is truncated to keep it bounded.
+- Placement never covers the span (which may be multi-line): by default it is
+  anchored at the **overlay's end line** and opens **downward**, so the whole
+  span stays above it. Only when the end is too near the window bottom for the
+  posframe to fit below is it anchored at the **overlay's beginning line** and
+  opened **upward** (keeping the span below it). Fit is estimated from the window
+  body height and the info's line count (`notelinks--info-fits-below-p`).
+- Anchors use the **beginning of the line**, not the span's column, so the frame
+  is left-aligned and a span near the right margin never pushes it off-frame.
+
+- Posframe content: **type**, **confidence (1–3)**, **why**, **target** (note
+  title + heading), and a snippet of the **target excerpt** (truncated to stay
+  bounded) — i.e. `notelinks--describe`.
 - It tracks point via a buffer-local `post-command-hook` (and an explicit update
   after programmatic moves), re-rendering only when the suggestion under point
-  changes. Off a suggestion it shows a hint plus the legend.
-- Each overlay also keeps a `help-echo` function (same content) for the mouse
-  tooltip — that never opens a window, so it stays.
-- The panel buffer uses a small `notelinks-panel-mode`; pressing **`q`** there
+  changes. Off a suggestion the posframe is **hidden**.
+- On a non-graphical frame (TTY) `posframe-workable-p` is nil, so the info falls
+  back to the **echo area** (`message`); the key legend still shows.
+- The legend buffer uses a small `notelinks-panel-mode`; pressing **`q`** there
   closes the panel and **quits the review** (in its source buffer), so the panel
   is also a valid exit point.
 
@@ -197,14 +206,14 @@ M-x notelinks-suggest
       resolve anchors → markers
       insert pending insert-templates
       create overlays (face + keymap + help-echo)
-      enable notelinks-review-mode (buffer-local; post-command-hook drives the panel)
-      show info/keys side panel
+      enable notelinks-review-mode (buffer-local; post-command-hook drives the info posframe)
+      show bottom key-legend panel
       jump point to first suggestion
-  → user accepts/rejects per suggestion (auto-advance; panel tracks point)
+  → user accepts/rejects per suggestion (auto-advance; info posframe tracks point)
   → when none remain, or on quit:
       finalize/revert, clear overlays + markers
       disable notelinks-review-mode
-      close info/keys panel
+      close key-legend panel + delete info posframe
 ```
 
 ## 11. Configuration variables (summary)
@@ -225,4 +234,3 @@ Commands: `notelinks-suggest` (review), `notelinks-server-status`,
 - Multiple target candidates per span (cycle targets in the popup).
 - Exposing engine knobs (`top_n`, similarity floor, type filter) from elisp —
   rely on engine config for now.
-- posframe / graphical popups.

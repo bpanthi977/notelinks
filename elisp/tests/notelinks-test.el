@@ -164,8 +164,8 @@ ENV is an already-built envelope alist.  `content' is bound for BODY."
   ;; B wraps "three four" (conf 5); they overlap on "three" -> keep B.
   (let ((env `((version . 1)
                (source . ((file) (title . "x") (id . "SID")))
-               (suggestions . (,(notelinks-test--sug "A" 3 "two three" "one " " four")
-                               ,(notelinks-test--sug "B" 5 "three four" "two " ""))))))
+               (suggestions . (,(notelinks-test--sug "A" 1 "two three" "one " " four")
+                               ,(notelinks-test--sug "B" 3 "three four" "two " ""))))))
     (notelinks-test--with-review "one two three four\n" env
       (should (= 1 (length notelinks--suggestions)))
       (should (string= "three four" (notelinks-sug-link-desc (car notelinks--suggestions)))))))
@@ -194,17 +194,20 @@ ENV is an already-built envelope alist.  `content' is bound for BODY."
 
 ;;;; Info panel
 
-(ert-deftest notelinks-test-panel-text-has-info-and-keys ()
-  (let ((s (notelinks--make-sug
-            (notelinks-test--sug "p" 4 "beta" "one " " two"))))
-    (let ((txt (notelinks--panel-text s)))
-      (should (string-match-p "analogous-mechanism" txt))   ; type
-      (should (string-match-p "★4" txt))                    ; confidence
-      (should (string-match-p "a accept" txt)))             ; key legend
-    ;; nil suggestion still shows the legend plus a hint
-    (let ((txt (notelinks--panel-text nil)))
-      (should (string-match-p "move onto" txt))
-      (should (string-match-p "q quit" txt)))))
+(ert-deftest notelinks-test-info-describes-suggestion ()
+  ;; Target info now lives in the posframe; its content comes from --describe.
+  (let* ((s (notelinks--make-sug
+             (notelinks-test--sug "p" 3 "beta" "one " " two")))
+         (txt (notelinks--describe s)))
+    (should (string-match-p "analogous-mechanism" txt))     ; type
+    (should (string-match-p "★3" txt))                      ; confidence
+    (should (string-match-p "why-p" txt))                   ; why
+    (should (string-match-p "Other" txt))))                 ; target title
+
+(ert-deftest notelinks-test-panel-shows-key-legend ()
+  ;; The bottom side panel now carries only the static key legend.
+  (should (string-match-p "a accept" notelinks--panel-keys))
+  (should (string-match-p "q quit" notelinks--panel-keys)))
 
 (ert-deftest notelinks-test-panel-q-bound ()
   (should (eq 'notelinks-panel-quit (lookup-key notelinks-panel-mode-map "q"))))
