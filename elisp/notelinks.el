@@ -60,6 +60,12 @@ When nil the engine falls back to its own NOTELINKS_CORPUS_DIR."
   :type '(choice (const :tag "Buffer order" buffer)
                  (const :tag "Confidence order" confidence)))
 
+(defcustom notelinks-min-confidence 2
+  "Minimum confidence (1–3) a suggestion must have to be reviewed.
+Suggestions the engine returns below this level are dropped before resolution
+\(reported as a count, not shown).  Set to 1 to keep everything."
+  :type 'integer)
+
 (defface notelinks-suggestion
   '((t :inherit highlight))
   "Face marking a pending wrap suggestion region in the buffer.")
@@ -408,7 +414,13 @@ where KEPT is plists and DISCARDED is `notelinks-sug' structs."
 (defun notelinks--on-result (src env)
   (with-current-buffer src
     (let* ((raws (alist-get 'suggestions env))
-           (sugs (mapcar #'notelinks--make-sug raws))
+           (all (mapcar #'notelinks--make-sug raws))
+           ;; Drop low-confidence suggestions up front (engine returns them; we
+           ;; only review those at or above `notelinks-min-confidence').
+           (sugs (seq-filter (lambda (s) (>= (notelinks-sug-confidence s)
+                                             notelinks-min-confidence))
+                             all))
+           (low (- (length all) (length sugs)))
            resolved unanchorable)
       ;; Phase 1: resolve positions (read-only).
       (dolist (s sugs)
@@ -447,14 +459,14 @@ where KEPT is plists and DISCARDED is `notelinks-sug' structs."
               (set-marker tbm nil) (set-marker tem nil)))
           (setq notelinks--suggestions (mapcar #'car marked)))
         ;; Report & enter review.
-        (notelinks--report notelinks--suggestions unanchorable discarded)
+        (notelinks--report notelinks--suggestions unanchorable discarded low)
         (if (null notelinks--suggestions)
             (message "notelinks: no applicable suggestions")
           (notelinks-review-mode 1)
           (notelinks--show-panel)
           (notelinks--goto-first))))))
 
-(defun notelinks--report (kept unanchorable discarded)
+(defun notelinks--report (kept unanchorable discarded &optional low)
   (when (or unanchorable discarded)
     (let ((buf (get-buffer-create "*notelinks*")))
       (with-current-buffer buf
@@ -471,10 +483,12 @@ where KEPT is plists and DISCARDED is `notelinks-sug' structs."
               (insert (format "  - [%s] %s\n" (notelinks-sug-type s) (notelinks-sug-why s))))))
         (special-mode))
       (display-buffer buf)))
-  (message "notelinks: %d shown%s%s"
+  (message "notelinks: %d shown%s%s%s"
            (length kept)
            (if unanchorable (format ", %d unanchorable" (length unanchorable)) "")
-           (if discarded (format ", %d discarded" (length discarded)) "")))
+           (if discarded (format ", %d discarded" (length discarded)) "")
+           (if (and low (> low 0))
+               (format ", %d below confidence %d" low notelinks-min-confidence) "")))
 
 ;;;; Metainfo (side panel + help-echo)
 

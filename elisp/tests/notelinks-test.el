@@ -87,12 +87,16 @@ ENV is an already-built envelope alist.  `content' is bound for BODY."
 ;;;; Fixture-driven — resolution, accept, reject
 
 (ert-deftest notelinks-test-resolves-all-fixture-suggestions ()
-  (notelinks-test--with-review (notelinks-test--read "epistemic_uncertainty.org")
-      (notelinks-test--fixture-env)
-    (should (= 4 (length notelinks--suggestions)))))
+  ;; Keep every fixture suggestion (it spans confidence 1–3) to exercise
+  ;; resolution; the confidence gate is covered separately.
+  (let ((notelinks-min-confidence 1))
+    (notelinks-test--with-review (notelinks-test--read "epistemic_uncertainty.org")
+        (notelinks-test--fixture-env)
+      (should (= 4 (length notelinks--suggestions))))))
 
 (ert-deftest notelinks-test-accept-all-produces-correct-links ()
-  (notelinks-test--with-review (notelinks-test--read "epistemic_uncertainty.org")
+  (let ((notelinks-min-confidence 1))
+   (notelinks-test--with-review (notelinks-test--read "epistemic_uncertainty.org")
       (notelinks-test--fixture-env)
     (notelinks-test--accept-all)
     (should (= 0 (length notelinks--suggestions)))
@@ -109,7 +113,7 @@ ENV is an already-built envelope alist.  `content' is bound for BODY."
       ;; wrap-span -> no-id heading fallback (::*Heading)
       (should (string-match-p
                (regexp-quote "[[id:40628C21-A838-45DA-836C-2FA6E9F3B4E6::*Statistical Mechanics][averaged over all models]]")
-               txt)))))
+               txt))))))
 
 (ert-deftest notelinks-test-reject-all-restores-buffer ()
   (notelinks-test--with-review (notelinks-test--read "epistemic_uncertainty.org")
@@ -169,6 +173,21 @@ ENV is an already-built envelope alist.  `content' is bound for BODY."
     (notelinks-test--with-review "one two three four\n" env
       (should (= 1 (length notelinks--suggestions)))
       (should (string= "three four" (notelinks-sug-link-desc (car notelinks--suggestions)))))))
+
+(ert-deftest notelinks-test-min-confidence-filters ()
+  ;; buffer: "one two three four"; A wraps "two" (conf 1), B wraps "four" (conf 3).
+  ;; With the default threshold (2) only B survives; lowering it keeps both.
+  (let ((env `((version . 1)
+               (source . ((file) (title . "x") (id . "SID")))
+               (suggestions . (,(notelinks-test--sug "A" 1 "two" "one " " three")
+                               ,(notelinks-test--sug "B" 3 "four" "three " ""))))))
+    (let ((notelinks-min-confidence 2))
+      (notelinks-test--with-review "one two three four\n" env
+        (should (= 1 (length notelinks--suggestions)))
+        (should (string= "four" (notelinks-sug-link-desc (car notelinks--suggestions))))))
+    (let ((notelinks-min-confidence 1))
+      (notelinks-test--with-review "one two three four\n" env
+        (should (= 2 (length notelinks--suggestions)))))))
 
 ;;;; Keybindings & jump
 
@@ -252,7 +271,8 @@ ENV is an already-built envelope alist.  `content' is bound for BODY."
 (ert-deftest notelinks-test-http-callback-routes-to-review ()
   "A simulated 200 response drives the same review pipeline as the CLI."
   (let ((json (notelinks-test--read "sample_output.json"))
-        (content (notelinks-test--read "epistemic_uncertainty.org")))
+        (content (notelinks-test--read "epistemic_uncertainty.org"))
+        (notelinks-min-confidence 1))   ; keep all four fixture suggestions
     (with-temp-buffer
       (insert content)
       (org-mode)

@@ -203,6 +203,7 @@ drift and warn; re-anchoring still relies on `expect`/`before`/`after`.
 M-x notelinks-suggest
   → query engine (cli subprocess or http daemon), buffer → engine; status indicator
   → on result:
+      drop suggestions below notelinks-min-confidence (reported as a count)
       resolve anchors → markers
       insert pending insert-templates
       create overlays (face + keymap + help-echo)
@@ -225,6 +226,7 @@ M-x notelinks-suggest
 | `notelinks-corpus-dir` | `nil` | `--corpus`; nil ⇒ engine env (`cli`) |
 | `notelinks-server-url` | `http://127.0.0.1:8765` | daemon base URL (`http`) |
 | `notelinks-navigation-order` | `buffer` | `buffer` \| `confidence` |
+| `notelinks-min-confidence` | `2` | drop suggestions below this confidence (1–3) before review |
 
 Commands: `notelinks-suggest` (review), `notelinks-server-status`,
 `notelinks-server-refresh` (`http` backend).
