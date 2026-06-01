@@ -183,7 +183,8 @@ whether it is a GENUINE, worth-linking resonance with some passage in the curren
 note and, if so, WHERE in the current note the link should attach; REJECT the \
 rest. Precision matters far more than recall: it is correct and expected to \
 return an EMPTY list when nothing genuinely resonates. Do not link mere topical \
-overlap or shared keywords.
+overlap or shared keywords. Do not suggest linking if the link doesn't add substantially\
+to the usefullness of the note.
 
 For each candidate you ACCEPT, return one suggestion with:
 * candidate_id — the number of the accepted candidate (as labelled, e.g. 1).
@@ -205,8 +206,8 @@ For each candidate you ACCEPT, return one suggestion with:
     false to link the target passage's owning HEADING (the default; prefer this).
 * anchor — WHERE in the CURRENT NOTE the link attaches. Copy text VERBATIM from
     the CURRENT NOTE (never paraphrase, never use target text). Two modes:
-    - mode="insert" — Add a short new
-      sentence that points the reader to the target: expect=<the exact verbatim
+    - mode="insert" — Add a few words or short new sentence
+      that points the reader to the target: expect=<the exact verbatim
       sentence in the current note to insert AFTER>, insert_text=<your authored
       prose containing the literal token {{link}} exactly once>. Keep insert_text
       to ONE short sentence, e.g. "Cache-efficient algorithms use a similar
