@@ -134,6 +134,51 @@ def test_resolve_anchor_duplicate_in_chunk_picks_first() -> None:
     assert out.char_start == 0
 
 
+def test_resolve_anchor_insert_tolerates_org_link_and_wrapped_newline() -> None:
+    # The reported case: the buffer has an org link and a line-wrap newline, but
+    # the judge renders the link to its visible text and joins the wrapped lines.
+    buffer = (
+        "Shannon [[id:40628C21-A838-45DA-836C-2FA6E9F3B4E6][entropy]] assigns "
+        "amount of uncertainity\nto an probability distribution.\n\nNext para."
+    )
+    src = make_chunk("S", 0, text=buffer, char_start=0, char_end=len(buffer))
+    anchor = JudgeAnchor(
+        mode="insert",
+        expect="Shannon entropy assigns amount of uncertainity to an probability distribution.",
+        insert_text="The formula has a deeper {{link}} in statistical mechanics.",
+    )
+
+    out = resolve_anchor(anchor, src, buffer)
+
+    assert out is not None
+    # Empty region right after the matched span's raw end ("distribution.").
+    end = buffer.index("distribution.") + len("distribution.")
+    assert out.char_start == end
+    assert out.char_end == end
+    assert out.expect == ""
+    assert out.template == "The formula has a deeper {{link}} in statistical mechanics."
+    # before/after are raw buffer slices, so the elisp client can re-anchor them.
+    assert out.before == buffer[max(0, end - 40) : end]
+    assert out.after == buffer[end : end + 40]
+
+
+def test_resolve_anchor_wrap_through_link_uses_raw_span_text() -> None:
+    # A wrap whose rendered expect crosses a link resolves to the RAW span text
+    # (with markup), so the wire `expect` matches the buffer verbatim.
+    buffer = "see [[id:X][entropy]] here"
+    src = make_chunk("S", 0, text=buffer, char_start=0, char_end=len(buffer))
+    anchor = JudgeAnchor(mode="wrap", expect="entropy here")
+
+    out = resolve_anchor(anchor, src, buffer)
+
+    assert out is not None
+    raw = "[[id:X][entropy]] here"
+    assert out.char_start == buffer.index(raw)
+    assert out.char_end == buffer.index(raw) + len(raw)
+    assert out.expect == raw  # raw span, not the judge's rendered "entropy here"
+    assert buffer[out.char_start : out.char_end] == out.expect
+
+
 # ---------------------------------------------------------------------------
 # Piece 2: judge_candidates (orchestration), with monkeypatched LLM + fake store.
 # ---------------------------------------------------------------------------

@@ -4,8 +4,9 @@ Two layers, mirroring `retrieve.py`:
 
 * :func:`resolve_anchor` — the **pure**, infra-free anchor-resolution core. Given
   a judge-returned :class:`JudgeAnchor`, the source :class:`Chunk`, and the full
-  buffer, it locates the verbatim ``expect`` text **within the source chunk's
-  span only** and produces the wire-level :class:`SourceAnchor` (offsets,
+  buffer, it locates the ``expect`` text **within the source chunk's span only**
+  (exact, else tolerant of rendered org links / wrapped whitespace — see
+  :func:`_find_span`) and produces the wire-level :class:`SourceAnchor` (offsets,
   ~40-char ``before``/``after``, ``template``, ``link_description``). Fully
   unit-testable with synthetic data.
 * :func:`judge_candidates` — the orchestration. It groups candidates by TARGET
@@ -83,6 +84,76 @@ def _strip_drawers(text: str) -> str:
     return "".join(out)
 
 
+# Org links: ``[[target]]`` or ``[[target][description]]``. Flattened to their
+# visible text when matching, since the judge renders them (it sees the raw note
+# but reproduces ``[[id:..][entropy]]`` as ``entropy``).
+_ORG_LINK_RE = re.compile(r"\[\[([^\]]+)\](?:\[([^\]]+)\])?\]")
+
+
+def _normalize_with_map(text: str) -> tuple[str, list[int]]:
+    """Normalize TEXT for tolerant matching and map each normalized char back.
+
+    Two transforms make the judge's *rendered* ``expect`` matchable against the
+    raw org buffer: org links are flattened to their visible text (the
+    description, or the target when there is none), and runs of whitespace
+    (including the newlines of a wrapped paragraph) collapse to a single space.
+
+    ``idx_map[j]`` is the index in TEXT that produced ``norm[j]``; ``idx_map`` has
+    ``len(norm) + 1`` entries, the last being ``len(text)``, so a match's end
+    offset maps back too.
+    """
+    norm: list[str] = []
+    idx_map: list[int] = []
+    i, n = 0, len(text)
+    prev_ws = False
+    while i < n:
+        m = _ORG_LINK_RE.match(text, i)
+        if m:
+            visible = m.group(2) if m.group(2) is not None else m.group(1)
+            for ch in visible:
+                norm.append(ch)
+                idx_map.append(i)
+            prev_ws = False
+            i = m.end()
+            continue
+        ch = text[i]
+        if ch.isspace():
+            if not prev_ws:
+                norm.append(" ")
+                idx_map.append(i)
+                prev_ws = True
+            i += 1
+        else:
+            norm.append(ch)
+            idx_map.append(i)
+            prev_ws = False
+            i += 1
+    idx_map.append(n)
+    return "".join(norm), idx_map
+
+
+def _find_span(haystack: str, needle: str) -> tuple[int, int] | None:
+    """Locate NEEDLE in HAYSTACK, returning ``(start, end)`` offsets in HAYSTACK.
+
+    Prefers an exact substring match. Falls back to a normalized match (org links
+    flattened, whitespace collapsed — see :func:`_normalize_with_map`) so the
+    judge's rendered ``expect`` still anchors when the span crosses a link or a
+    wrapped newline, mapping the normalized hit back to raw offsets. Returns
+    ``None`` when NEEDLE is found by neither.
+    """
+    exact = haystack.find(needle)
+    if exact != -1:
+        return exact, exact + len(needle)
+    norm_hay, idx_map = _normalize_with_map(haystack)
+    norm_needle, _ = _normalize_with_map(needle)
+    if not norm_needle:
+        return None
+    pos = norm_hay.find(norm_needle)
+    if pos == -1:
+        return None
+    return idx_map[pos], idx_map[pos + len(norm_needle)]
+
+
 # ---------------------------------------------------------------------------
 # Piece 1: pure anchor resolution (the testable core).
 # ---------------------------------------------------------------------------
@@ -104,6 +175,12 @@ def resolve_anchor(
       ``buffer[source_chunk.char_start : source_chunk.char_end]`` (the original
       behaviour, retained for the pure unit tests / a possible chunk-scoped
       fallback). First occurrence within the span wins.
+
+    Matching is exact first, then tolerant (:func:`_find_span`): the judge sees
+    the raw note but renders org links (``[[id:..][entropy]]`` → ``entropy``) and
+    collapses wrapped newlines, so a literal search would miss spans crossing a
+    link or line wrap. The tolerant pass flattens links / collapses whitespace
+    and maps the hit back to raw offsets.
 
     Returns ``None`` if ``expect`` is not found in the chunk span — the caller
     then drops the suggestion or falls back to a whole-chunk wrap.
@@ -131,11 +208,12 @@ def resolve_anchor(
     chunk_span = buffer[span_start:span_end]
 
     # First occurrence within the search span (deferred-ambiguity: first wins).
-    local = chunk_span.find(anchor.expect)
-    if local == -1:
+    # Tolerant of org-link markup and wrapped whitespace the judge renders away.
+    found = _find_span(chunk_span, anchor.expect)
+    if found is None:
         return None
-    match_start = span_start + local
-    match_end = match_start + len(anchor.expect)
+    match_start = span_start + found[0]
+    match_end = span_start + found[1]
 
     if anchor.mode == "insert":
         # Empty region at the end of the matched span.
@@ -147,9 +225,11 @@ def resolve_anchor(
     else:  # "wrap"
         region_start = match_start
         region_end = match_end
-        expect = anchor.expect
+        # The verbatim region text (which may differ from the judge's rendered
+        # ``expect`` — e.g. embedded markup), so the client matches it as-is.
+        expect = buffer[match_start:match_end]
         template = "{{link}}"
-        link_description = anchor.expect
+        link_description = expect
 
     before = buffer[max(0, region_start - _CONTEXT_CHARS) : region_start]
     after = buffer[region_end : region_end + _CONTEXT_CHARS]
