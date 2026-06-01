@@ -171,12 +171,19 @@ For each candidate you ACCEPT, return one suggestion with:
 * target_is_note — true to link the WHOLE target note (connection is note-wide),
     false to link the target passage's owning HEADING (the default; prefer this).
 * anchor — WHERE in the CURRENT NOTE the link attaches. Copy text VERBATIM from
-    the CURRENT NOTE (never paraphrase, never use target text):
-    - To turn an existing phrase into a link: mode="wrap", expect=<the exact
-      phrase from the current note to wrap>. Keep it as short as conveys the idea.
-    - To add a new sentence carrying the link: mode="insert", expect=<the exact
-      verbatim sentence in the current note to insert AFTER>, insert_text=<your
-      authored prose containing the literal token {{link}} exactly once>.
+    the CURRENT NOTE (never paraphrase, never use target text). Two modes:
+    - mode="insert" — Add a short new
+      sentence that points the reader to the target: expect=<the exact verbatim
+      sentence in the current note to insert AFTER>, insert_text=<your authored
+      prose containing the literal token {{link}} exactly once>. Keep insert_text
+      to ONE short sentence, e.g. "Cache-efficient algorithms use a similar
+      {{link}}." Prefer insert for elaborates / analogous-mechanism / contradicts
+      / instance-of / generalizes.
+    - mode="wrap" — USUALLY for "mention", or when a SHORT noun phrase already names
+      the target concept. expect=<the exact phrase to wrap>, and it MUST be a
+      short noun phrase of about 1-5 words (a term, not a clause). NEVER wrap a
+      whole sentence, clause, or passage — if the natural anchor is longer than a
+      few words, use mode="insert" instead.
     The expect text MUST appear verbatim in the current note. Do not emit
     before/after offsets — the engine computes those.
 

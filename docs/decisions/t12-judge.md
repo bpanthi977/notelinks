@@ -135,10 +135,17 @@ context-snippet/locator split in v1.
 - For each accepted candidate: return the offered `target_chunk_id`, a 1–5
   `confidence`, a tight one-sentence `why` (the shared idea, not a summary),
   `target_is_note` (false = link the chunk's heading, the default), and an
-  `anchor` whose `expect` is **copied verbatim from the SOURCE chunk** (wrap a
-  short phrase, or insert authored prose containing `{{link}}` after a verbatim
-  sentence). Explicitly tells the model **not** to emit before/after offsets —
-  the engine computes those.
+  `anchor` whose `expect` is **copied verbatim from the current note**.
+  **Anchor-shape steer (quality):** `mode="insert"` is the **default** for
+  almost every connection (elaborates / analogous-mechanism / contradicts /
+  instance-of / generalizes) — a single short new sentence carrying `{{link}}`.
+  `mode="wrap"` is reserved for `mention` or when a **short noun phrase (~1–5
+  words)** already names the target concept; the prompt explicitly **forbids
+  wrapping a whole sentence, clause, or passage** and says to fall back to
+  insert when the natural anchor is longer than a few words. (Earlier wording —
+  "wrap, keep it short" — let the model wrap an entire passage; tightened.)
+  Explicitly tells the model **not** to emit before/after offsets — the engine
+  computes those.
 - Output must match `JudgeResponse` / `RawJudgeSuggestion` (enforced by
   `complete_structured`'s strict json_schema response_format).
 
