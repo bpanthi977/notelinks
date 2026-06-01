@@ -80,14 +80,16 @@ def test_resolve_anchor_wrap_offsets_and_context() -> None:
     assert out.after == buffer[start + len("driving signal") : start + len("driving signal") + 40]
 
 
-def test_resolve_anchor_insert_empty_region_and_template() -> None:
+def test_resolve_anchor_insert_inline_brace_anchor() -> None:
+    # The judge marks the link anchor inline with {{...}}; the engine rewrites
+    # that span to the wire {{link}} token and uses the words as the description.
     buffer = "The system minimizes surprise. It does so continuously."
     src = make_chunk("S", 0, text=buffer, char_start=0, char_end=len(buffer))
     sentence = "The system minimizes surprise."
     anchor = JudgeAnchor(
         mode="insert",
         expect=sentence,
-        insert_text=" See also {{link}}.",
+        insert_text=" This connects to {{free energy}} more broadly.",
     )
 
     out = resolve_anchor(anchor, src, buffer)
@@ -98,9 +100,26 @@ def test_resolve_anchor_insert_empty_region_and_template() -> None:
     assert out.char_start == end
     assert out.char_end == end
     assert out.expect == ""
-    assert out.template == " See also {{link}}."
+    # Braced phrase -> link_description; the marker becomes the wire {{link}}.
+    assert out.template == " This connects to {{link}} more broadly."
+    assert out.link_description == "free energy"
     assert out.before == buffer[max(0, end - 40) : end]
     assert out.after == buffer[end : end + 40]
+
+
+def test_resolve_anchor_insert_literal_link_token_back_compat() -> None:
+    # Back-compat: insert_text with a literal {{link}} and no other marker keeps
+    # working — template unchanged, description falls back to the expect sentence.
+    buffer = "The system minimizes surprise. It does so continuously."
+    src = make_chunk("S", 0, text=buffer, char_start=0, char_end=len(buffer))
+    sentence = "The system minimizes surprise."
+    anchor = JudgeAnchor(mode="insert", expect=sentence, insert_text=" See also {{link}}.")
+
+    out = resolve_anchor(anchor, src, buffer)
+
+    assert out is not None
+    assert out.template == " See also {{link}}."
+    assert out.link_description == sentence
 
 
 def test_resolve_anchor_not_found_returns_none() -> None:
@@ -145,7 +164,7 @@ def test_resolve_anchor_insert_tolerates_org_link_and_wrapped_newline() -> None:
     anchor = JudgeAnchor(
         mode="insert",
         expect="Shannon entropy assigns amount of uncertainity to an probability distribution.",
-        insert_text="The formula has a deeper {{link}} in statistical mechanics.",
+        insert_text="The formula has a deeper {{connection}} in statistical mechanics.",
     )
 
     out = resolve_anchor(anchor, src, buffer)
@@ -157,6 +176,7 @@ def test_resolve_anchor_insert_tolerates_org_link_and_wrapped_newline() -> None:
     assert out.char_end == end
     assert out.expect == ""
     assert out.template == "The formula has a deeper {{link}} in statistical mechanics."
+    assert out.link_description == "connection"
     # before/after are raw buffer slices, so the elisp client can re-anchor them.
     assert out.before == buffer[max(0, end - 40) : end]
     assert out.after == buffer[end : end + 40]
@@ -366,7 +386,9 @@ def test_judge_candidates_target_is_note_yields_no_heading(monkeypatch) -> None:
     assert out[0].target.heading is None  # whole-note target
 
 
-def test_judge_candidates_insert_uses_target_title_description(monkeypatch) -> None:
+def test_judge_candidates_insert_uses_inline_brace_description(monkeypatch) -> None:
+    # Insert description comes from the judge's inline {{...}} marker — NOT the
+    # target title (the old override was removed for naturally-flowing prose).
     candidate = _make_candidate()
     store = FakeStore(None)
     canned = JudgeResponse(
@@ -379,7 +401,7 @@ def test_judge_candidates_insert_uses_target_title_description(monkeypatch) -> N
                 anchor=JudgeAnchor(
                     mode="insert",
                     expect="The brain corrects its model against incoming sensation.",
-                    insert_text=" Compare {{link}}.",
+                    insert_text=" This {{mirrors}} immune adaptation.",
                 ),
                 target_is_note=False,
             )
@@ -394,8 +416,8 @@ def test_judge_candidates_insert_uses_target_title_description(monkeypatch) -> N
     assert len(out) == 1
     anchor = out[0].source_anchor
     assert anchor.expect == ""  # insert => empty region
-    assert anchor.template == " Compare {{link}}."
-    assert anchor.link_description == "Immune Memory"  # defaulted to target title
+    assert anchor.template == " This {{link}} immune adaptation."
+    assert anchor.link_description == "mirrors"  # the inline-marked phrase
 
 
 def test_judge_candidates_empty_response_yields_no_suggestions(monkeypatch) -> None:

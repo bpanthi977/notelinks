@@ -31,7 +31,7 @@
         "before": "how uncertain is each model\non its own)\n",
         "after": "\n---\n",
         "template": "\nThis decomposition is the {{link}} between the prediction and the parameters: entropy of the model-averaged prediction minus the average per-model entropy.\n",
-        "link_description": "Mutual Information"
+        "link_description": "mutual information"
       }
     },
     {

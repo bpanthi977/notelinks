@@ -73,10 +73,15 @@ core. `source_chunk` is now **optional**:
   that span in the buffer; `expect` = span text; `template="{{link}}"`;
   `link_description` = span text.
 - `mode="insert"`: empty region (`char_start == char_end`) at the END of the
-  matched `expect` span; `expect=""`; `template = anchor.insert_text` (prose
-  carrying `{{link}}`); `link_description` defaults to the span text in the pure
-  core, then `judge_candidates` **overrides it to the target note title** (a
-  more sensible default for an inserted-prose link).
+  matched `expect` span; `expect=""`. The judge authors a natural sentence in
+  `insert_text` and marks the link words **inline** with `{{...}}` (e.g.
+  `"The formula for it {{emerges}} from discretization."`). The engine
+  (`_BRACE_RE`) lifts the braced phrase into `link_description` and rewrites that
+  span to the wire `{{link}}` token, so `template` flows naturally. No
+  title/heading override is applied (an earlier version forced the description to
+  the target note title / heading text, which produced stilted prose). Back-compat:
+  an `insert_text` with a literal `{{link}}` and no other marker keeps working,
+  with `link_description` falling back to the `expect` sentence.
 - `before`/`after` = up to ~40 chars of buffer flanking the region, **computed
   by the engine** from the buffer (never produced by the LLM — models paraphrase
   long spans).

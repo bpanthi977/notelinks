@@ -61,6 +61,11 @@ _TARGET_EXCERPT_MAX = 600
 _DRAWER_OPEN_RE = re.compile(r"^[ \t]*:([A-Za-z0-9_-]+):[ \t]*$")
 _DRAWER_END_RE = re.compile(r"^[ \t]*:END:[ \t]*$", re.IGNORECASE)
 
+# Inline anchor marker in the judge's ``insert_text``: the words wrapped in
+# ``{{...}}`` become the link (its description); the engine rewrites that span to
+# the wire ``{{link}}`` token. Non-greedy so only the marked phrase is captured.
+_BRACE_RE = re.compile(r"\{\{(.+?)\}\}")
+
 
 def _strip_drawers(text: str) -> str:
     """Drop ``:DRAWER:`` … ``:END:`` blocks from the note view shown to the judge.
@@ -278,8 +283,19 @@ def resolve_anchor(
         region_start = match_end
         region_end = match_end
         expect = ""
-        template = anchor.insert_text if anchor.insert_text is not None else "{{link}}"
-        link_description = anchor.expect
+        # The judge marks the link anchor INLINE with ``{{words}}``: that phrase
+        # is the link description; rewrite it to the wire ``{{link}}`` token so
+        # the surrounding prose flows naturally. Back-compat: an insert_text that
+        # already uses a literal ``{{link}}`` (or no marker) falls back to the
+        # expect sentence as the description.
+        raw_insert = anchor.insert_text if anchor.insert_text is not None else "{{link}}"
+        brace = _BRACE_RE.search(raw_insert)
+        if brace is not None and brace.group(1) != "link":
+            link_description = brace.group(1)
+            template = raw_insert[: brace.start()] + "{{link}}" + raw_insert[brace.end() :]
+        else:
+            link_description = anchor.expect
+            template = raw_insert
     else:  # "wrap"
         region_start = match_start
         region_end = match_end
@@ -344,13 +360,14 @@ For each candidate you ACCEPT, return one suggestion with:
     false to link the target passage's owning HEADING (the default; prefer this).
 * anchor — WHERE in the CURRENT NOTE the link attaches. Copy text VERBATIM from
     the CURRENT NOTE (never paraphrase, never use target text). Two modes:
-    - mode="insert" — Add a few words or short new sentence
-      that points the reader to the target: expect=<the exact verbatim
-      sentence in the current note to insert AFTER>, insert_text=<your authored
-      prose containing the literal token {{link}} exactly once>. Keep insert_text
-      to ONE short sentence, e.g. "Cache-efficient algorithms use a similar
-      {{link}}." Prefer insert for elaborates / analogous-mechanism / contradicts
-      / instance-of / generalizes.
+    - mode="insert" — Add ONE short, complete, natural sentence that points the
+      reader to the target. expect=<the exact verbatim sentence in the current
+      note to insert AFTER>; insert_text=<your authored sentence>. Inside that
+      sentence, wrap the EXACT words that should become the link in double curly
+      braces {{...}} — exactly once. The braced words must read naturally where
+      they sit (a content word or short phrase, ~1-4 words);
+      Prefer insert for elaborates / analogous-mechanism / contradicts /
+      instance-of / generalizes.
     - mode="wrap" — USUALLY for "mention", or when a SHORT noun phrase already names
       the target concept. expect=<the exact phrase to wrap>, and it MUST be a
       short noun phrase of about 1-5 words (a term, not a clause). NEVER wrap a
@@ -600,10 +617,6 @@ def judge_candidates(
 
             target_chunk = candidate.target_chunk
             target = _build_target(raw, target_chunk)
-            # For insert mode, default the link description to the target title
-            # rather than the source-side expect sentence.
-            if raw.anchor.mode == "insert":
-                anchor.link_description = target_chunk.note_title
 
             counter += 1
             excerpt = target_chunk.text[:_TARGET_EXCERPT_MAX]

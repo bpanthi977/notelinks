@@ -322,12 +322,10 @@ BODY is a JSON string (for POST).  Signals on connection failure or non-2xx."
 
 (defun notelinks--insert-text (s)
   "Return the prose to insert for insert-suggestion S (its filled template).
-When the target is a heading, the heading's text is used as the link
-description; otherwise the engine's `link_description' is used."
+The link description is the engine's `link_description' — the words the judge
+marked inline with `{{...}}' — so the inserted sentence reads naturally."
   (let* ((target (notelinks-sug-target s))
-         (desc (or (notelinks--heading-text target)
-                   (notelinks-sug-link-desc s)
-                   "")))
+         (desc (or (notelinks-sug-link-desc s) "")))
     (notelinks--fill (notelinks-sug-template s)
                      (notelinks--assemble-link target desc))))
 
