@@ -298,6 +298,22 @@ BODY is a JSON string (for POST).  Signals on connection failure or non-2xx."
   "Substitute LINK for the {{link}} slot in TEMPLATE."
   (replace-regexp-in-string (regexp-quote "{{link}}") link (or template "{{link}}") t t))
 
+(defun notelinks--space-pad (text pos)
+  "Return TEXT padded with a single space on each side that abuts non-space.
+POS is the buffer position where TEXT will be inserted.  A space is added on a
+side only when both the neighbouring buffer char and TEXT's own edge there are
+non-whitespace, so inserted prose never fuses with the surrounding text.  The
+pads live inside TEXT, so they are reverted cleanly when the insert is rejected."
+  (let* ((wsp '(?\s ?\t ?\n))
+         (len (length text))
+         (before (char-before pos))
+         (after (char-after pos))
+         (lead (and (> len 0) before
+                    (not (memq before wsp)) (not (memq (aref text 0) wsp))))
+         (trail (and (> len 0) after
+                     (not (memq after wsp)) (not (memq (aref text (1- len)) wsp)))))
+    (concat (and lead " ") text (and trail " "))))
+
 ;;;; Anchor resolution
 
 (defun notelinks--find-near (needle guess)
@@ -412,7 +428,8 @@ where KEPT is plists and DISCARDED is `notelinks-sug' structs."
               (when (eq (notelinks-sug-mode s) 'insert)
                 (let* ((link (notelinks--assemble-link
                               (notelinks-sug-target s) (or (notelinks-sug-link-desc s) "")))
-                       (text (notelinks--fill (notelinks-sug-template s) link)))
+                       (text (notelinks--space-pad
+                              (notelinks--fill (notelinks-sug-template s) link) tbm)))
                   (save-excursion (goto-char tbm) (insert text))))))
           ;; Phase 4: build overlays from final marker positions.
           (dolist (m marked)
