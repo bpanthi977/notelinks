@@ -90,11 +90,11 @@ class Settings(BaseSettings):
 
     # --- Retrieval & candidate selection ---------------------------------------
     top_k: int = 8  # nearest neighbours per source chunk
-    per_source_n: int = 3  # targets kept per source chunk (N)
-    global_cap_m: int = 40  # global candidate cap (M)
+    per_source_n: int = 2  # targets kept per source chunk (N)
+    global_cap_m: int = 20  # global candidate cap (M)
     # Cosine-similarity floor: drop candidate pairs below this before judging.
     # Conservative placeholder; calibrate against the real corpus later.
-    sim_floor: float = 0.2
+    sim_floor: float = 0.5
 
     # --- Output ----------------------------------------------------------------
     top_n: int = 12  # final ranked suggestions cap
