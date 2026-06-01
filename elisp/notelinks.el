@@ -62,7 +62,12 @@ When nil the engine falls back to its own NOTELINKS_CORPUS_DIR."
 
 (defface notelinks-suggestion
   '((t :inherit highlight))
-  "Face marking a pending suggestion region in the buffer.")
+  "Face marking a pending wrap suggestion region in the buffer.")
+
+(defface notelinks-insert
+  '((t :inherit highlight :box (:line-width -1 :color "green")))
+  "Face marking a pending insert suggestion (prose added by the engine).
+A green outline distinguishes inserted text from a wrapped span.")
 
 ;;;; State (buffer-local in the source note buffer)
 
@@ -368,7 +373,9 @@ where KEPT is plists and DISCARDED is `notelinks-sug' structs."
 (defun notelinks--make-overlay (s beg end)
   (let ((ov (make-overlay beg end nil nil nil)))
     (overlay-put ov 'notelinks-sug s)
-    (overlay-put ov 'face 'notelinks-suggestion)
+    (overlay-put ov 'face (if (eq (notelinks-sug-mode s) 'insert)
+                              'notelinks-insert
+                            'notelinks-suggestion))
     (overlay-put ov 'keymap notelinks-overlay-map)
     (setf (notelinks-sug-overlay s) ov)
     ov))
