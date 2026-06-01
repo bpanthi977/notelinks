@@ -744,21 +744,26 @@ trailing separators).  MARKER is an insertion-type-nil marker at the anchor."
   "Non-nil if posframe is available and can display on this frame."
   (and (require 'posframe nil t) (posframe-workable-p)))
 
-(defun notelinks--bol (pos)
-  "Return the beginning-of-line position of POS."
-  (save-excursion (goto-char pos) (line-beginning-position)))
+(defun notelinks--screen-line-start (pos)
+  "Return the start of the *screen* line containing POS.
+Uses `vertical-motion' so it respects line wrapping (`visual-line-mode',
+continuation lines) — `line-beginning-position' would jump to the logical
+line start, which can be several screen rows above POS in a wrapped buffer."
+  (save-excursion (goto-char pos) (vertical-motion 0) (point)))
 
 (defun notelinks--show-info (s)
   "Show suggestion S's details in a posframe just below its span.
-The posframe is anchored at the **beginning of the last line** of the
+The posframe is anchored at the start of the **last screen line** of the
 inserted/wrapped span and opens **downward**, so it sits below the whole span
-(never covering it) and is left-aligned.  `posframe-poshandler-point-1' clamps
-the frame within the parent frame — so it is never cut off at the right edge,
-and it auto-flips above only when there is genuinely no room below.  A
-bare-point fallback covers the (unexpected) overlay-less case."
+(never covering it) and is left-aligned.  The anchor is the screen-line start
+\(not the logical-line start) so it lands on the right row even when the span
+wraps under `visual-line-mode'.  `posframe-poshandler-point-1' clamps the frame
+within the parent frame — so it is never cut off at the right edge, and it
+auto-flips above only when there is genuinely no room below.  A bare-point
+fallback covers the (unexpected) overlay-less case."
   (if (notelinks--posframe-usable-p)
       (let* ((ov (notelinks-sug-overlay s))
-             (anchor (notelinks--bol (if ov (overlay-end ov) (point)))))
+             (anchor (notelinks--screen-line-start (if ov (overlay-end ov) (point)))))
         (posframe-show notelinks--info-buffer-name
                        :string (notelinks--describe s)
                        :position anchor
