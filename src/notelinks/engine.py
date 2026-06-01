@@ -83,16 +83,23 @@ class Engine:
             self._judge_client = llm.make_judge_client(self.settings)
         return self._judge_client
 
-    def refresh(self, *, rebuild: bool = False) -> dict:
+    def refresh(self, *, rebuild: bool = False, progress=None) -> dict:
         """Incrementally refresh the corpus index (design §7).
 
         Delegates to :func:`notelinks.index.build.refresh` with the shared store
         and client. ``rebuild=True`` forces a full reindex. Returns the build
         stats dict (``indexed`` / ``reindexed`` / ``skipped`` / ``deleted`` /
-        ``chunks``).
+        ``chunks``). ``progress`` is an optional ``progress(done, total,
+        rel_path)`` reporting hook passed straight through (e.g. a CLI stderr
+        bar); ``None`` (the default) is silent — the daemon and tests leave it
+        unset.
         """
         stats = build.refresh(
-            self.store, self.settings, client=self.embedding_client, rebuild=rebuild
+            self.store,
+            self.settings,
+            client=self.embedding_client,
+            rebuild=rebuild,
+            progress=progress,
         )
         logger.info(
             "refresh: indexed=%d reindexed=%d skipped=%d deleted=%d chunks=%d (rebuild=%s)",

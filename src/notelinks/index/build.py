@@ -30,6 +30,7 @@ manifest paths no longer present on disk get their chunks + manifest row removed
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Callable
 from pathlib import Path
 
 from notelinks.config import Settings
@@ -97,6 +98,7 @@ def refresh(
     *,
     client=None,
     rebuild: bool = False,
+    progress: Callable[[int, int, str], None] | None = None,
 ) -> dict:
     """Incrementally refresh the whole corpus against the store (design §7).
 
@@ -111,15 +113,21 @@ def refresh(
     force-rebuilt) files, ``skipped`` counts untouched / watermark-only files,
     ``deleted`` counts removed files, and ``chunks`` is the total chunks written
     this run. Stateless given the injected ``store`` / ``client``.
+
+    ``progress``, if given, is called as ``progress(done, total, rel_path)`` once
+    per scanned file — ``done`` files processed of ``total``, with the file just
+    handled. Purely a reporting hook (e.g. a CLI stderr bar); it never affects
+    indexing and defaults to ``None`` (silent) for the daemon / tests.
     """
     root = _corpus_root(settings)
 
     stats = {"indexed": 0, "reindexed": 0, "skipped": 0, "deleted": 0, "chunks": 0}
 
+    org_paths = [p for p in sorted(root.rglob("*.org")) if p.is_file()]
+    total = len(org_paths)
+
     seen: set[str] = set()
-    for abs_path in sorted(root.rglob("*.org")):
-        if not abs_path.is_file():
-            continue
+    for done, abs_path in enumerate(org_paths, start=1):
         rel_path = abs_path.relative_to(root).as_posix()
         seen.add(rel_path)
 
@@ -148,6 +156,9 @@ def refresh(
         else:
             # Untouched (mtime <= watermark): no file read, no work.
             stats["skipped"] += 1
+
+        if progress is not None:
+            progress(done, total, rel_path)
 
     # Deletions: manifest paths no longer present on disk.
     for rel_path in store.all_manifest_paths():

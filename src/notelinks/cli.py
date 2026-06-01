@@ -30,6 +30,39 @@ from notelinks.engine import Engine
 
 app = typer.Typer(help="Suggest idea-resonance links for an org-roam note.")
 
+# Width of the drawn bar (the "[####----]" part), in characters.
+_BAR_WIDTH = 30
+
+
+def _make_progress_bar():
+    """An ``index``-progress callback that draws a bar on **stderr**, or ``None``.
+
+    Returns a ``progress(done, total, rel_path)`` closure suitable for
+    ``Engine.refresh(progress=...)`` — but only when stderr is an interactive TTY.
+    When stderr is redirected/piped (the elisp subprocess, ``2>file``, CI) it
+    returns ``None`` so no carriage-return spam pollutes captured logs; stdout
+    stays the pure-JSON contract regardless. The bar is rewritten in place with
+    ``\\r`` and cleared with a final newline on completion.
+    """
+    if not sys.stderr.isatty():
+        return None
+
+    def _progress(done: int, total: int, rel_path: str) -> None:
+        total = max(total, 1)
+        filled = int(_BAR_WIDTH * done / total)
+        bar = "#" * filled + "-" * (_BAR_WIDTH - filled)
+        # Truncate the filename so the line never wraps and smears the bar.
+        name = rel_path if len(rel_path) <= 30 else "…" + rel_path[-29:]
+        end = "\n" if done >= total else ""
+        print(
+            f"\r[notelinks] indexing [{bar}] {done}/{total} {name:<30}",
+            end=end,
+            file=sys.stderr,
+            flush=True,
+        )
+
+    return _progress
+
 # Shared option types (Annotated style — keeps the typer.Option call out of the
 # default position, so ruff's B008 false-positive never fires).
 _CorpusOpt = Annotated[
@@ -107,7 +140,7 @@ def suggest(
     buffer_text = sys.stdin.read()
     settings = _build_settings(corpus)
     engine = Engine(settings)
-    engine.refresh()
+    engine.refresh(progress=_make_progress_bar())
     envelope = engine.suggest(buffer_text)
     typer.echo(envelope.model_dump_json(indent=2))
 
@@ -122,7 +155,7 @@ def index(
     """Refresh (or rebuild) the corpus index; print the build stats."""
     _enable_observability(verbose, trace)
     settings = _build_settings(corpus)
-    stats = Engine(settings).refresh(rebuild=rebuild)
+    stats = Engine(settings).refresh(rebuild=rebuild, progress=_make_progress_bar())
     typer.echo(json.dumps(stats, indent=2))
 
 
