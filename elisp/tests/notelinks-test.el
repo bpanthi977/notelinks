@@ -239,6 +239,13 @@ ENV is an already-built envelope alist.  `content' is bound for BODY."
   (should (eq 'notelinks-jump-to-target (lookup-key notelinks-overlay-map "j")))
   (should (eq 'notelinks-jump-to-target (lookup-key notelinks-review-mode-map (kbd "C-c C-j")))))
 
+(ert-deftest notelinks-test-quit-bound ()
+  ;; C-g quits buffer-wide (review map) and from the panel, alongside q.
+  (should (eq 'notelinks-quit (lookup-key notelinks-review-mode-map (kbd "C-g"))))
+  (should (eq 'notelinks-quit (lookup-key notelinks-review-mode-map (kbd "C-c C-q"))))
+  (should (eq 'notelinks-panel-quit (lookup-key notelinks-panel-mode-map (kbd "C-g"))))
+  (should (eq 'notelinks-panel-quit (lookup-key notelinks-panel-mode-map "q"))))
+
 (ert-deftest notelinks-test-jump-errors-off-overlay ()
   (with-temp-buffer
     (org-mode)
@@ -270,7 +277,8 @@ ENV is an already-built envelope alist.  `content' is bound for BODY."
 (ert-deftest notelinks-test-panel-shows-key-legend ()
   ;; The bottom side panel now carries only the static key legend.
   (should (string-match-p "a accept" notelinks--panel-keys))
-  (should (string-match-p "q quit" notelinks--panel-keys)))
+  (should (string-match-p "C-g" notelinks--panel-keys))
+  (should (string-match-p "quit" notelinks--panel-keys)))
 
 (ert-deftest notelinks-test-panel-q-bound ()
   (should (eq 'notelinks-panel-quit (lookup-key notelinks-panel-mode-map "q"))))

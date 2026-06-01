@@ -60,12 +60,13 @@ overlay's own `keymap` property:
 | `r` | reject current, advance to next |
 | `n` | next suggestion |
 | `p` | previous suggestion |
-| `q` | quit — reject all remaining, end session |
+| `q` / `C-g` | quit — reject all remaining, end session |
 
 - A buffer-local minor mode `notelinks-review-mode` is active for the whole
   session. It binds only **non-self-insert** keys (`C-c C-n` next, `C-c C-p`
-  prev, `C-c C-q` quit) so the user can navigate/quit from *anywhere* in the
-  buffer without shadowing ordinary typing.
+  prev, `C-c C-q` / `C-g` quit) so the user can navigate/quit from *anywhere* in
+  the buffer without shadowing ordinary typing. `C-g` is the quick exit from
+  anywhere; it also quits from the legend panel.
 - The fast single keys (`a r n p q`) live on each **overlay keymap**, so they
   only fire when point is on a suggestion — elsewhere those letters type
   normally.

@@ -680,13 +680,14 @@ trailing separators).  MARKER is an insertion-type-nil marker at the anchor."
 ;;;; Key legend (bottom side panel) + target info (posframe)
 
 (defconst notelinks--panel-keys
-  "  a accept   r reject   n next   p previous   j jump   q quit
-  (off-overlay: C-c C-n / C-c C-p / C-c C-j / C-c C-q)"
+  "  a accept   r reject   n next   p previous   j jump   q/C-g quit
+  (off-overlay: C-c C-n / C-c C-p / C-c C-j / C-c C-q / C-g)"
   "Key legend shown in the bottom side panel for the whole session.")
 
 (defvar notelinks-panel-mode-map
   (let ((m (make-sparse-keymap)))
     (define-key m "q" #'notelinks-panel-quit)
+    (define-key m (kbd "C-g") #'notelinks-panel-quit)
     m)
   "Keymap for the key-legend side panel buffer.")
 
@@ -824,6 +825,7 @@ the posframe when point leaves every suggestion."
     (define-key m (kbd "C-c C-p") #'notelinks-prev)
     (define-key m (kbd "C-c C-j") #'notelinks-jump-to-target)
     (define-key m (kbd "C-c C-q") #'notelinks-quit)
+    (define-key m (kbd "C-g") #'notelinks-quit)
     m)
   "Keymap active buffer-wide during a notelinks review session.")
 
