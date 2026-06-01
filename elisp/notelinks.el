@@ -108,7 +108,6 @@ A green outline distinguishes inserted text from a wrapped span.")
 (declare-function posframe-hide "posframe" (buffer))
 (declare-function posframe-delete "posframe" (buffer))
 (declare-function posframe-poshandler-point-bottom-left-corner "posframe" (info))
-(declare-function posframe-poshandler-point-bottom-left-corner-upward "posframe" (info))
 
 ;;;; Engine invocation
 
@@ -739,40 +738,21 @@ trailing separators).  MARKER is an insertion-type-nil marker at the anchor."
   "Return the beginning-of-line position of POS."
   (save-excursion (goto-char pos) (line-beginning-position)))
 
-(defun notelinks--info-line-count (text)
-  "Estimate the posframe's height in text lines for TEXT (with border slack)."
-  (+ 2 (cl-count ?\n text)))
-
-(defun notelinks--info-fits-below-p (pos lines)
-  "Non-nil if LINES text lines fit below POS in the selected window.
-Nil when POS is scrolled out of view (the span runs past the window bottom)."
-  (let* ((posn (posn-at-point pos))
-         (y (and posn (cdr (posn-x-y posn))))
-         (line-h (default-line-height)))
-    (and y (>= (- (window-body-height nil t) y line-h) (* lines line-h)))))
-
 (defun notelinks--show-info (s)
-  "Show suggestion S's details in a posframe that never covers its span.
-Anchors use the **beginning of the line** (not the span's column), so the frame
-is left-aligned and never pushed off the right edge of the frame by a span near
-the right margin.  By default the posframe is anchored at the overlay's **end**
-line and opens **downward**, so the whole inserted/wrapped span (however many
-lines) stays above it.  Only when the span's end sits too near the window bottom
-for the posframe to fit below is it anchored at the overlay's **beginning** line
-and opened **upward** instead — keeping the span below it.  A bare-point
-fallback covers the (unexpected) overlay-less case."
+  "Show suggestion S's details in a posframe just below its span.
+The posframe is anchored at the **beginning of the last line** of the
+inserted/wrapped span and opens **downward**, so it sits below the whole span
+(never covering it) and is left-aligned.  `posframe-poshandler-point-1' clamps
+the frame within the parent frame — so it is never cut off at the right edge,
+and it auto-flips above only when there is genuinely no room below.  A
+bare-point fallback covers the (unexpected) overlay-less case."
   (if (notelinks--posframe-usable-p)
       (let* ((ov (notelinks-sug-overlay s))
-             (text (notelinks--describe s))
-             (beg (notelinks--bol (if ov (overlay-start ov) (point))))
-             (end (notelinks--bol (if ov (overlay-end ov) (point))))
-             (down (notelinks--info-fits-below-p end (notelinks--info-line-count text))))
+             (anchor (notelinks--bol (if ov (overlay-end ov) (point)))))
         (posframe-show notelinks--info-buffer-name
-                       :string text
-                       :position (if down end beg)
-                       :poshandler (if down
-                                       #'posframe-poshandler-point-bottom-left-corner
-                                     #'posframe-poshandler-point-bottom-left-corner-upward)
+                       :string (notelinks--describe s)
+                       :position anchor
+                       :poshandler #'posframe-poshandler-point-bottom-left-corner
                        :max-width 72
                        :internal-border-width 1
                        :internal-border-color "gray50"

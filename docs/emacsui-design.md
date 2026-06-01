@@ -86,14 +86,12 @@ window is a fixed two-line legend; the posframe floats next to the suggestion
 under review, so the details sit where the eye already is rather than at the
 bottom of the frame.
 
-- Placement never covers the span (which may be multi-line): by default it is
-  anchored at the **overlay's end line** and opens **downward**, so the whole
-  span stays above it. Only when the end is too near the window bottom for the
-  posframe to fit below is it anchored at the **overlay's beginning line** and
-  opened **upward** (keeping the span below it). Fit is estimated from the window
-  body height and the info's line count (`notelinks--info-fits-below-p`).
-- Anchors use the **beginning of the line**, not the span's column, so the frame
-  is left-aligned and a span near the right margin never pushes it off-frame.
+- Placement never covers the span (which may be multi-line): it is anchored at
+  the **beginning of the overlay's last line** and opens **downward**
+  (`posframe-poshandler-point-bottom-left-corner`), so it sits below the whole
+  span. posframe's own `posframe-poshandler-point-1` clamps the frame inside the
+  parent frame — left-aligned and never cut off at the right edge — and
+  auto-flips above only when there is genuinely no room below.
 
 - Posframe content: **type**, **confidence (1–3)**, **why**, **target** (note
   title + heading), and a snippet of the **target excerpt** (truncated to stay
