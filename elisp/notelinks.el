@@ -34,7 +34,7 @@
   :group 'org
   :prefix "notelinks-")
 
-(defcustom notelinks-backend 'cli
+(defcustom notelinks-backend 'http
   "How to reach the engine.
 `cli'  — spawn `notelinks suggest' per query (cold start + index walk).
 `http' — POST to a running `notelinks serve' daemon (warm, fast)."
@@ -549,11 +549,9 @@ trailing separators).  MARKER is an insertion-type-nil marker at the anchor."
          (htext (and heading (alist-get 'text heading)))
          (loc (if htext (format "%s › %s" title htext) title))
          (excerpt (notelinks-sug-target-excerpt s)))
-    (concat (format "[%s ★%d] %s" (notelinks-sug-type s) (notelinks-sug-confidence s)
-                    (notelinks-sug-why s))
-            (format "\n→ %s" loc)
-            (when (and excerpt (not (string-empty-p excerpt)))
-              (format "\n  \"%s\"" (notelinks--truncate excerpt 200))))))
+    (concat (format "%s\n\n" loc)
+	    (format "[%s ★%d] %s" (notelinks-sug-type s) (notelinks-sug-confidence s)
+                    (notelinks-sug-why s)))))
 
 ;;;; Navigation
 
@@ -767,9 +765,10 @@ fallback covers the (unexpected) overlay-less case."
                        :position anchor
                        :poshandler #'posframe-poshandler-point-bottom-left-corner
                        :max-width 72
-                       :internal-border-width 1
-                       :internal-border-color "gray50"
-                       :background-color (face-background 'tooltip nil t)))
+		       :font (face-font 'default)
+                       :internal-border-width 4
+                       :internal-border-color "blue"
+                       :background-color (face-background 'default nil t)))
     ;; No graphical frame (e.g. a TTY): fall back to the echo area.
     (message "%s" (notelinks--describe s))))
 
