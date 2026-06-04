@@ -1,17 +1,34 @@
 # notelinks
 
-Suggests **idea-resonance** links between the note you're writing and the rest
-of your org-roam corpus — analogies, shared mechanisms, contradictions,
-instances of a general claim, generalizations of a specific one — even when the
-two passages share no vocabulary. The unit of connection is a **passage**, not a
-whole note. It surfaces ranked candidate links for you to review and accept; it
-never edits your notes itself.
+A big part of working in any field is learning, and a big part of
+learning is connecting new ideas to ones you've already
+encountered. Finding those connections is not straightforward. When I
+write a new note, I want to discover connections to notes I've written
+before, and those connections are often not keyword-based or
+obvious. Sometimes I'm lucky and a related concept is fresh in my mind
+because I read it recently or it stuck with me — but many times I miss
+the link entirely.
+
+`notelinks` suggests links from the note I'm currently working on to
+other notes in my collection. And these aren't just "related" links: a
+connection has a *type* — the target note might be an elaboration, an
+example, a generalization, a contradiction, and so on. This is a
+problem that matters to me personally, which is why I picked
+it. notelinks surfaces ranked candidate links for you to review and
+accept; it never edits your notes itself.
+
+
+`notelinks` is a two-stage RAG pipeline (retrieve → judge) accessed by
+cli or HTTP. See [`architecture.md`](./docs/architecture.md) for
+overview.
+
+![architecture diagram](./docs/architecture.png)
 
 - **What** we're building: [`docs/objective.md`](docs/objective.md)
 - **How** it works (settled design): [`docs/design.md`](docs/design.md)
 - **Output contract** (engine ↔ frontend): [`docs/json-format.md`](docs/json-format.md)
 - **Per-task decision log**: [`docs/decisions/`](docs/decisions/)
-- **Walkthrough video**: [`video.md`](video.md)
+- **Architecture walkthrough video:** [`notelinks-walkthrough.mp4`](https://drive.google.com/file/d/1qoFiozdY3JR_6lpk8VR5uj4SZzVJXouV/view?usp=drive_link)
 
 ## How it works
 
@@ -51,7 +68,7 @@ OPENROUTER_API_KEY=sk-or-...
 # NOTELINKS_CORPUS_DIR=/path/to/your/org-roam/notes   # else pass --corpus
 ```
 
-A sample corpus of 21 org-roam notes ships under [`notes/`](notes/).
+A sample corpus of a few org-roam notes ships under [`notes/`](notes/).
 
 ## Usage
 
